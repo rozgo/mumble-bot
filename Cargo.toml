@@ -1,0 +1,30 @@
+[package]
+name = "mmo-mumble"
+version = "0.1.0"
+authors = ["Alex Rozgo <alex.rozgo@gmail.com>"]
+
+[dependencies]
+clap = "2.24"
+toml = "0.4"
+byteorder = "1.0.0"
+protobuf = "1.2"
+openssl = "0.9"
+tokio-core = "0.1"
+tokio-io = "0.1"
+tokio-file-unix = "0.3.0"
+tokio-timer = "0.1"
+tokio-openssl = "0.1"
+futures = "0.1"
+native-tls = "0.1"
+tokio-tls = "0.1"
+varint = "0.9.0"
+# opus = { git = "https://github.com/rozgo/opus-rs.git" }
+opus = { path = "../../opus-rs" }
+hyper = "0.11"
+hyper-tls = "0.1"
+pretty_env_logger = "0.1"
+chrono = "0.2"
+rand = "0.3"
+serde = "1.0"
+serde_derive = "1.0"
+warheadhateus = { git = "https://github.com/rozgo/warheadhateus.git" }

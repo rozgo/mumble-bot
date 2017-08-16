@@ -1,0 +1,11 @@
+target/
+**/*.rs.bk
+/UnrealMMO/
+/voice-dec/
+/ai-req/
+incoming*.opus
+outgoing*.opus
+Cargo.lock
+Config.toml
+Scratch.txt
+/temp/
