@@ -1,5 +1,5 @@
 [package]
-name = "mmo-mumble"
+name = "mumblebot"
 version = "0.1.0"
 authors = ["Alex Rozgo <alex.rozgo@gmail.com>"]
 
@@ -12,7 +12,7 @@ protobuf = "1.2"
 openssl = "0.9"
 tokio-core = "0.1"
 tokio-io = "0.1"
-tokio-file-unix = "0.3.0"
+#tokio-file-unix = "0.3.0"
 tokio-timer = "0.1"
 tokio-openssl = "0.1"
 futures = "0.1"
@@ -28,5 +28,13 @@ chrono = "0.2"
 rand = "0.3"
 serde = "1.0"
 serde_derive = "1.0"
-warheadhateus = { git = "https://github.com/rozgo/warheadhateus.git" }
+#warheadhateus = { git = "https://github.com/rozgo/warheadhateus.git" }
 sample="*"
+
+[lib]
+name = "mumblebot"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mumblebin"
+path = "src/bin.rs"
