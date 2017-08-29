@@ -9,7 +9,7 @@ extern crate clap;
 
 extern crate openssl;
 extern crate tokio_core;
-extern crate tokio_openssl;
+//extern crate tokio_openssl;
 extern crate tokio_io;
 //extern crate tokio_file_unix;
 extern crate tokio_timer;
@@ -17,13 +17,13 @@ extern crate protobuf;
 extern crate byteorder;
 extern crate opus;
 extern crate chrono;
-extern crate hyper;
-extern crate hyper_tls;
-extern crate rand;
+//extern crate hyper;
+//extern crate hyper_tls;
+//extern crate rand;
 
 //extern crate warheadhateus;
 
-extern crate serde;
+//extern crate serde;
 extern crate toml;
 #[macro_use]
 extern crate serde_derive;
@@ -124,6 +124,8 @@ struct LocalSession {
 
 fn mumble_decode(remote_session: &mut Box<RemoteSession>, opus_frame: Vec<u8>) -> (Vec<u8>, bool) {
 
+    println!("!!__@__!!__@__!!__@__!!__@__!!__@__!!__@__!!__@__!!__@__!!__@__!!__@__");
+
     let mut rdr = Cursor::new(opus_frame);
 
     let mut opus_frame = Vec::<u8>::new();
@@ -148,7 +150,7 @@ fn mumble_decode(remote_session: &mut Box<RemoteSession>, opus_frame: Vec<u8>) -
 
     util::opus_analyze(&opus_frame);
 
-    let mut sample_pcm = vec![0i16; 960 * segments];
+    let mut sample_pcm = vec![0i16; 320 * segments];
 
     let size: usize = remote_session.decoder.decode(&opus_frame[..], &mut sample_pcm[..], false).unwrap();
     println!("pcm size: {}", size);
@@ -167,7 +169,7 @@ fn manage_remote_sessions(session_id: u64, sessions: Box<RemoteSessions>) -> Box
     }
     else {
         let session = Box::new(RemoteSession {
-            decoder: Box::new(opus::Decoder::new(48000, opus::Channels::Mono).unwrap()),
+            decoder: Box::new(opus::Decoder::new(16000, opus::Channels::Mono).unwrap()),
             session: session_id,
             sequence: 0,
         });
@@ -186,12 +188,16 @@ fn test_impl<'a>() -> impl Future<Item = (), Error = Error> + 'a {
         .map(|_| ())
 }
 
+fn do_that<'a>(vox_tx: futures::sync::mpsc::Sender<Vec<u8>>) -> impl Future<Item = (), Error = Error> + 'a {
+    ok(())
+}
+
 fn mumble_loop<'a>(remote_sessions: Box<RemoteSessions>,
-    rx: TCPReceiver,
-               tx: futures::sync::mpsc::Sender<(Vec<u8>, u32, bool)>)
+                   rx: TCPReceiver,
+                   vox_tx: futures::sync::mpsc::Sender<Vec<u8>>)
                -> impl Future<Item = (), Error = Error> + 'a {
 
-    loop_fn((rx, tx, LocalSession{session: 0}, remote_sessions), |(rx, tx, local_session, remote_sessions)|
+    loop_fn((rx, vox_tx, LocalSession{session: 0}, remote_sessions), |(rx, tx, local_session, remote_sessions)|
 
         tokio_io::io::read_exact(rx, [0u8; 2])
         .and_then(|(rx, buf)| {
@@ -224,7 +230,7 @@ fn mumble_loop<'a>(remote_sessions: Box<RemoteSessions>,
                     let mut msg = mumble::Version::new();
                     msg.merge_from(&mut inp).unwrap();
                     println!("version: {:?}", msg);
-                    ok((rx, tx, local_session, remote_sessions))
+                    ok((rx, tx, local_session, remote_sessions)).boxed()
                 },
                 1 => { // UDPTunnel
                     let mut rdr = Cursor::new(&buf);
@@ -233,6 +239,7 @@ fn mumble_loop<'a>(remote_sessions: Box<RemoteSessions>,
                     let aud_type = aud_header & 0b11100000;
                     let aud_target = aud_header & 0b00011111;
                     debug!("type: {} target: {}", aud_type, aud_target);
+                    let r =
                     match aud_type {
 
                         128 => { // OPUS encoded voice data
@@ -250,83 +257,87 @@ fn mumble_loop<'a>(remote_sessions: Box<RemoteSessions>,
                                 mumble_decode(remote_session, opus_frame)
                             };
 
-                            ok((rx, tx, local_session, remote_sessions))
+//                            ok((rx, tx, local_session, remote_sessions)).boxed()
+//                                .and_then(|o| ok(o))
 //                                .boxed()
 
-//                            tx.send((pcm, local_session.session as u32, done))
-//                            .and_then(move |tx| {
-//                                ok((rx, tx, local_session, remote_sessions))
-//                            })
-//                            .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))
-//                            .boxed()
+                            tx.send(pcm)
+                            .and_then(move |tx| {
+                                ok((rx, tx, local_session, remote_sessions))
+                            })
+                                .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))
+                                .boxed()
+//                                .map(|_| ok(()))
+
                         },
                         32 => { // Ping
-                            ok((rx, tx, local_session, remote_sessions))
+                            ok((rx, tx, local_session, remote_sessions)).boxed()
                         },
                         _ => {
                             panic!("aud_type");
                         }
-                    }
+                    };
+                    r
                 },
                 3 => { // Ping
                     let mut msg = mumble::Ping::new();
                     msg.merge_from(&mut inp).unwrap();
                     println!("Ping: {:?}", msg);
-                    ok((rx, tx, local_session, remote_sessions))
+                    ok((rx, tx, local_session, remote_sessions)).boxed()
                 },
                 5 => { // ServerSync
                     let mut msg = mumble::ServerSync::new();
                     msg.merge_from(&mut inp).unwrap();
                     println!("ServerSync: {:?}", msg);
-                    ok((rx, tx, LocalSession{session: msg.get_session() as u64}, remote_sessions))
+                    ok((rx, tx, LocalSession{session: msg.get_session() as u64}, remote_sessions)).boxed()
                 },
                 7 => { // ChannelState
                     let mut msg = mumble::ChannelState::new();
                     msg.merge_from(&mut inp).unwrap();
                     println!("ChannelState: {:?}", msg);
-                    ok((rx, tx, local_session, remote_sessions))
+                    ok((rx, tx, local_session, remote_sessions)).boxed()
                 },
                 8 => { // UserRemove
                     let mut msg = mumble::UserRemove::new();
                     msg.merge_from(&mut inp).unwrap();
                     println!("UserRemove: {:?}", msg);
-                    ok((rx, tx, local_session, remote_sessions))
+                    ok((rx, tx, local_session, remote_sessions)).boxed()
                 },
                 9 => { // UserState
                     let mut msg = mumble::UserState::new();
                     msg.merge_from(&mut inp).unwrap();
                     println!("UserState: {:?}", msg);
-                    ok((rx, tx, local_session, remote_sessions))
+                    ok((rx, tx, local_session, remote_sessions)).boxed()
                 },
                 11 => { // TextMessage
                     let mut msg = mumble::TextMessage::new();
                     msg.merge_from(&mut inp).unwrap();
                     println!("TextMessage: {:?}", msg);
-                    ok((rx, tx, local_session, remote_sessions))
+                    ok((rx, tx, local_session, remote_sessions)).boxed()
                 },
                 15 => { // CryptSetup
                     let mut msg = mumble::CryptSetup::new();
                     msg.merge_from(&mut inp).unwrap();
                     println!("CryptSetup: {:?}", msg);
-                    ok((rx, tx, local_session, remote_sessions))
+                    ok((rx, tx, local_session, remote_sessions)).boxed()
                 },
                 20 => { // PermissionQuery
                     let mut msg = mumble::PermissionQuery::new();
                     msg.merge_from(&mut inp).unwrap();
                     println!("PermissionQuery: {:?}", msg);
-                    ok((rx, tx, local_session, remote_sessions))
+                    ok((rx, tx, local_session, remote_sessions)).boxed()
                 },
                 21 => { // CodecVersion
                     let mut msg = mumble::CodecVersion::new();
                     msg.merge_from(&mut inp).unwrap();
                     println!("CodecVersion: {:?}", msg);
-                    ok((rx, tx, local_session, remote_sessions))
+                    ok((rx, tx, local_session, remote_sessions)).boxed()
                 },
                 24 => { // ServerConfig
                     let mut msg = mumble::ServerConfig::new();
                     msg.merge_from(&mut inp).unwrap();
                     println!("ServerConfig: {:?}", msg);
-                    ok((rx, tx, local_session, remote_sessions))
+                    ok((rx, tx, local_session, remote_sessions)).boxed()
                 },
                 _ => {
                     panic!("msg type oops")
@@ -339,11 +350,79 @@ fn mumble_loop<'a>(remote_sessions: Box<RemoteSessions>,
     )
 }
 
+pub fn say<'a>(rx: futures::sync::mpsc::Receiver<Vec<u8>>,
+               tx: futures::sync::mpsc::Sender<Vec<u8>>)
+    -> impl Future<Item = (), Error = Error> + 'a {
+
+    // Hz * channel * ms / 1000
+    let sample_channels : u32 = 1;
+    let sample_rate : u32 = 16000;
+    let sample_ms : u32 = 10;
+    let sample_size: u32 = sample_rate * sample_channels * sample_ms / 1000;
+
+    println!("sample channels: {} rate: {} ms: {} size: {}", sample_channels, sample_rate, sample_ms, sample_size);
+
+    let mut encoder = opus::Encoder::new(sample_rate,
+                                         opus::Channels::Mono,
+                                         opus::Application::Voip).unwrap();
+
+    let mut sequence = chrono::UTC::now().timestamp() as u64;
+
+    let mut chunk_buffer = vec![0i16; sample_size as usize];
+
+    rx.map(|segment| {
+        futures::stream::iter_ok::<_,()>(segment)
+    })
+    .flatten()
+    .chunks(2)
+    .and_then(|raw| {
+        let pcm = (&raw[..]).read_i16::<LittleEndian>().unwrap();
+        ok::<i16, ()>(pcm)
+    })
+    .chunks(sample_size as usize)
+    .fold(tx, move |tx, chunk| {
+        let mut chunk = Vec::from(chunk);
+        chunk.resize(sample_size as usize, 0);
+        let frame = encoder.encode_vec(&chunk[..], 50000).unwrap();
+
+        sequence = sequence + 1;
+
+        let done = false;
+
+        let aud_header = 0b100 << 5;
+        let data = Vec::<u8>::new();
+        let mut data = Cursor::new(data);
+        data.write_u8(aud_header).unwrap();
+        data.write_varint(sequence).unwrap();
+        let opus_len =
+            if done {
+                frame.len() as u64 | 0x2000 }
+                else { frame.len() as u64 };
+        data.write_varint(opus_len).unwrap();
+        data.write_all(&frame).unwrap();
+        let data = data.into_inner();
+
+        let s = data.len();
+        let mut buf = vec![0u8; (s + 6) as usize];
+        (&mut buf[0..]).write_u16::<BigEndian>(1).unwrap(); // Packet type: UDPTunnel
+        (&mut buf[2..]).write_u32::<BigEndian>(s as u32).unwrap();
+        (&mut buf[6..]).write(&data[..]).unwrap();
+
+//        println!("saying");
+
+        tx.send(buf)
+            .map(|tx| tx)
+            .map_err(|_| ())
+    })
+    .map(|_| ())
+    .map_err(|_| Error::new(ErrorKind::Other, "vox out"))
+}
+
 pub fn say_something(tx: futures::sync::mpsc::Sender<Vec<u8>>) {
 
-    std::thread::sleep_ms(5000);
+    std::thread::sleep(std::time::Duration::from_secs(5));
 
-    let mut pcm_file = fs::File::open("c:\\temp\\thx.raw").unwrap();
+    let mut pcm_file = fs::File::open("/Users/rozgo/Projects/mumble-bot/thx.raw").unwrap();
     let mut pcm_data = Vec::<u8>::new();
     pcm_file.read_to_end(&mut pcm_data).unwrap();
 
@@ -400,7 +479,7 @@ pub fn say_something(tx: futures::sync::mpsc::Sender<Vec<u8>>) {
         (&mut buf[2..]).write_u32::<BigEndian>(s as u32).unwrap();
         (&mut buf[6..]).write(&data[..]).unwrap();
 
-        std::thread::sleep_ms(sample_ms);
+        std::thread::sleep(std::time::Duration::from_millis(sample_ms as u64));
 
         let tx0 = tx.send(buf);
         tx = tx0.wait().unwrap();
@@ -424,7 +503,8 @@ pub fn cmd() {
     let mut core = Core::new().unwrap();
     let handle = core.handle();
 
-    let (app_logic, mum_tx) = run(mumble_server, &handle);
+    let (vox_tx, _) = futures::sync::mpsc::channel::<Vec<u8>>(0);
+    let (app_logic, mum_tx) = run(mumble_server, vox_tx, &handle);
 
     let tx = mum_tx.clone();
     std::thread::spawn(|| {
@@ -435,6 +515,7 @@ pub fn cmd() {
 }
 
 pub fn run<'a>(mumble_server: &'a String,
+               vox_tx: futures::sync::mpsc::Sender<Vec<u8>>,
                handle: &tokio_core::reactor::Handle)
     -> (impl Future<Item = (), Error = Error> + 'a, futures::sync::mpsc::Sender<Vec<u8>>) {
 
@@ -444,7 +525,7 @@ pub fn run<'a>(mumble_server: &'a String,
 
     let comm = TcpStream::connect(&addr, &handle).and_then(move|socket| {
         println!("Connecting to mumble_server: {}", mumble_server);
-        let path = Path::new("mumble.pem");
+//        let path = Path::new("mumble.pem");
         let mut ctx = SslContext::builder(SslMethod::tls()).unwrap();
         ctx.set_verify_callback(SSL_VERIFY_PEER, |_, _| true);
         //assert!(ctx.set_certificate_file(&path, X509_FILETYPE_PEM).is_ok());
@@ -498,12 +579,10 @@ pub fn run<'a>(mumble_server: &'a String,
         })
         .map_err(|_| Error::new(ErrorKind::Other, "writing to tcp"));
 
-        let (vox_tx, vox_task) = futures::sync::mpsc::channel::<(Vec<u8>, u32, bool)>(0);
+//        let (vox_tx, vox_task) = futures::sync::mpsc::channel::<(Vec<u8>, u32, bool)>(0);
         let mumble_ping = mumble_ping(mum_tx.clone());
 
         let mumble_loop = mumble_loop(Box::new(RemoteSessions::new()),mum_reader, vox_tx);
-
-
 
         Future::join3(mumble_ping, mum_writer, mumble_loop)
     })
