@@ -580,9 +580,7 @@ pub fn run<'a>(mumble_server: &'a String,
         })
         .map_err(|_| Error::new(ErrorKind::Other, "writing to tcp"));
 
-//        let (vox_tx, vox_task) = futures::sync::mpsc::channel::<(Vec<u8>, u32, bool)>(0);
         let mumble_ping = mumble_ping(mum_tx.clone());
-
         let mumble_loop = mumble_loop(Box::new(RemoteSessions::new()),mum_reader, vox_tx);
 
         Future::join3(mumble_ping, mum_writer, mumble_loop)

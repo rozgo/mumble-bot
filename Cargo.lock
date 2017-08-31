@@ -11,7 +11,7 @@ dependencies = [
  "log 0.3.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "native-tls 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "openssl 0.9.17 (registry+https://github.com/rust-lang/crates.io-index)",
- "opus 0.2.0",
+ "opus 0.2.0 (git+https://github.com/rozgo/opus-rs.git?branch=windows_vs)",
  "pretty_env_logger 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "protobuf 1.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand 0.3.16 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -435,14 +435,16 @@ dependencies = [
 [[package]]
 name = "opus"
 version = "0.2.0"
+source = "git+https://github.com/rozgo/opus-rs.git?branch=windows_vs#e621f3775f16fe2dc2fcae90fc950f8014ecb5f0"
 dependencies = [
  "libc 0.2.29 (registry+https://github.com/rust-lang/crates.io-index)",
- "opus-sys 0.2.1",
+ "opus-sys 0.2.1 (git+https://github.com/rozgo/rust-opus.git?branch=windows_vs)",
 ]
 
 [[package]]
 name = "opus-sys"
 version = "0.2.1"
+source = "git+https://github.com/rozgo/rust-opus.git?branch=windows_vs#69a5dda03161df9b1114d43896dc5d37496ab4e0"
 dependencies = [
  "libc 0.2.29 (registry+https://github.com/rust-lang/crates.io-index)",
  "pkg-config 0.3.9 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -905,6 +907,8 @@ dependencies = [
 "checksum num_cpus 1.6.2 (registry+https://github.com/rust-lang/crates.io-index)" = "aec53c34f2d0247c5ca5d32cca1478762f301740468ee9ee6dcb7a0dd7a0c584"
 "checksum openssl 0.9.17 (registry+https://github.com/rust-lang/crates.io-index)" = "085aaedcc89a2fac1eb2bc19cd66f29d4ea99fec60f82a5f3a88a6be7dbd90b5"
 "checksum openssl-sys 0.9.17 (registry+https://github.com/rust-lang/crates.io-index)" = "7e3a9845a4c9fdb321931868aae5549e96bb7b979bf9af7de03603d74691b5f3"
+"checksum opus 0.2.0 (git+https://github.com/rozgo/opus-rs.git?branch=windows_vs)" = "<none>"
+"checksum opus-sys 0.2.1 (git+https://github.com/rozgo/rust-opus.git?branch=windows_vs)" = "<none>"
 "checksum percent-encoding 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)" = "de154f638187706bde41d9b4738748933d64e6b37bdbffc0b47a97d16a6ae356"
 "checksum pkg-config 0.3.9 (registry+https://github.com/rust-lang/crates.io-index)" = "3a8b4c6b8165cd1a1cd4b9b120978131389f64bdaf456435caa41e630edba903"
 "checksum pretty_env_logger 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "8a97d1fde8be5bdb2c315277042a39a89b8ca5640c9d8e1a900cc9d906ee5af2"
