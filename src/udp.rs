@@ -49,16 +49,25 @@ pub fn udp_recv_loop<'a>(remote_sessions: Arc<Mutex<HashMap<u64, std::boxed::Box
 
     udp_socket_rx.fold((remote_sessions, vox_inp_tx), move |(remote_sessions, vox_inp_tx), (_socket, msg)| {
 
-        let mut rdr = Cursor::new(&msg);
+        let crypt_len =  msg.len();
+
+        println!("crypt_len: {}", crypt_len);
+        let mut data = vec![0u8; crypt_len - 4];
+        let mut crypt_state = crypt_state.lock().unwrap();
+        let decrypt = crypt_state.decrypt(&msg, &mut data);
+        println!("decrypt: {}", decrypt);
+
+        let mut rdr = Cursor::new(&data);
         let aud_header = rdr.read_u8().unwrap();
         // println!("incoming aud_header: {}", aud_header);
         let aud_type = aud_header & 0b11100000;
         let aud_target = aud_header & 0b00011111;
-        println!("type: {} target: {}", aud_type, aud_target);
 
         match aud_type {
 
-            128 => { // OPUS encoded voice data
+            0b10000000 => { // OPUS encoded voice data
+
+                println!("audio packet type: OPUS target: {}", aud_target);
 
                 let aud_session = rdr.read_varint().unwrap();
                 let _aud_sequence = rdr.read_varint().unwrap();
@@ -67,29 +76,10 @@ pub fn udp_recv_loop<'a>(remote_sessions: Arc<Mutex<HashMap<u64, std::boxed::Box
                 let mut opus_frame = Vec::<u8>::new();
                 rdr.read_to_end(&mut opus_frame).unwrap();
 
-                let crypt_len =  opus_frame.len();
-                // let mut data = if crypt_len > 4 {
-                //     let mut data = vec![0u8; crypt_len - 4];
-                //     let mut crypt_state = crypt_state.lock().unwrap();
-                //     if crypt_state.decrypt(&opus_frame[..], &mut data) {
-                //         data
-                //     }
-                //     else {
-                //         vec![0u8; 12]
-                //     }
-                // }
-                // else {
-                //     vec![0u8; 12]
-                // };
-
-                let mut data = vec![0u8; crypt_len - 4];
-                let mut crypt_state = crypt_state.lock().unwrap();
-                crypt_state.decrypt(&opus_frame[..], &mut data);
-
                 let (pcm, _done) = {
                     let mut remote_sessions = remote_sessions.lock().unwrap();
                     let remote_session = remote_sessions.get_mut(&aud_session).unwrap();
-                    util::opus_decode(remote_session, data)
+                    util::opus_decode(remote_session, opus_frame)
                 };
 
                 vox_inp_tx.send(pcm)
@@ -99,11 +89,28 @@ pub fn udp_recv_loop<'a>(remote_sessions: Arc<Mutex<HashMap<u64, std::boxed::Box
                 .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))
                 .boxed()
             },
-            32 => { // Ping
+            0b00100000 => { // Ping
+                println!("audio packet type: Ping target: {}", aud_target);
+                ok((remote_sessions, vox_inp_tx))
+                .boxed()
+            },
+            0b00000000 => { // CELT Alpha
+                println!("audio packet type: CELT Alpha target: {}", aud_target);
+                ok((remote_sessions, vox_inp_tx))
+                .boxed()
+            },
+            0b01000000 => { // Speex
+                println!("audio packet type: Speex target: {}", aud_target);
+                ok((remote_sessions, vox_inp_tx))
+                .boxed()
+            },
+            0b01100000 => { // CELT Beta
+                println!("audio packet type: CELT Beta target: {}", aud_target);
                 ok((remote_sessions, vox_inp_tx))
                 .boxed()
             },
             _ => {
+                println!("audio packet unknown type: {:b} target: {}", aud_type, aud_target);
                 ok((remote_sessions, vox_inp_tx))
                 .boxed()
             }
@@ -128,7 +135,7 @@ pub fn udp_ping(mum_tx: futures::sync::mpsc::Sender<Vec<u8>>, crypt_state: Arc<M
             let mut buf = vec![0u8; data.len() + 4];
             {
                 let mut crypt_state = crypt_state.lock().unwrap();
-                crypt_state.encrypt(&data[..], &mut buf[..])
+                crypt_state.encrypt(&data, &mut buf)
             };
 
             tx.send(buf)

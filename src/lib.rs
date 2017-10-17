@@ -118,7 +118,7 @@ pub fn say<'a>(vox_out_rx: futures::sync::mpsc::Receiver<Vec<u8>>,
         .fold(udp_tx, move |udp_tx, chunk| {
             let mut chunk = Vec::from(chunk);
             chunk.resize(sample_size as usize, 0);
-            let frame = encoder.encode_vec(&chunk[..], 4000).unwrap();
+            let frame = encoder.encode_vec(&chunk, 4000).unwrap();
 
             sequence = sequence + 1;
 
@@ -139,7 +139,7 @@ pub fn say<'a>(vox_out_rx: futures::sync::mpsc::Receiver<Vec<u8>>,
             let mut buf = vec![0u8; data.len() + 4];
             {
                 let mut crypt_state = crypt_state.lock().unwrap();
-                crypt_state.encrypt(&data[..], &mut buf[..])
+                crypt_state.encrypt(&data, &mut buf)
             };
 
             udp_tx.send(buf)
@@ -163,12 +163,14 @@ pub fn say_test(vox_out_tx: futures::sync::mpsc::Sender<Vec<u8>>) {
     let mut pcm_data = Vec::<u8>::new();
     pcm_file.read_to_end(&mut pcm_data).unwrap();
 
+    println!("BEGIN: say_test");
     let mut vox_out_tx = vox_out_tx;
     for buf in pcm_data.chunks(sample_size as usize * 2) {
         std::thread::sleep(std::time::Duration::from_millis((sample_ms as f32 / 1.1) as u64));
         let tx0 = vox_out_tx.send(Vec::from(&buf[..]));
         vox_out_tx = tx0.wait().unwrap();
     }
+    println!("END: say_test");
 }
 
 pub fn udp_crypt() -> Arc<Mutex<ocbaes128::CryptState>> {
@@ -189,7 +191,7 @@ pub fn cmd() {
         toml::from_str(&config).unwrap()
     };
 
-    let local_addr: SocketAddr = String::from("192.168.0.39:0").parse().unwrap();
+    let local_addr: SocketAddr = String::from("192.168.1.7:0").parse().unwrap();
     let mumble_server: SocketAddr = config.mumble.server.parse().unwrap();
     let mut core = Core::new().unwrap();
     let handle = core.handle();
