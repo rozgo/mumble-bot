@@ -44,10 +44,10 @@ pub fn udp_recv_loop<'a>(remote_sessions: Arc<Mutex<HashMap<u64, std::boxed::Box
     udp_socket_rx: futures::stream::SplitStream<tokio_core::net::UdpFramed<AudioPacker>>,
     _udp_tx: futures::sync::mpsc::Sender<std::vec::Vec<u8>>,
     vox_inp_tx: futures::sync::mpsc::Sender<Vec<u8>>,
-    _crypt_state: Arc<Mutex<ocbaes128::CryptState>>)
+    crypt_state: Arc<Mutex<ocbaes128::CryptState>>)
     -> impl Future<Item = (), Error = Error> + 'a {
 
-    udp_socket_rx.fold((remote_sessions, vox_inp_tx), |(remote_sessions, vox_inp_tx), (_socket, msg)| {
+    udp_socket_rx.fold((remote_sessions, vox_inp_tx), move |(remote_sessions, vox_inp_tx), (_socket, msg)| {
 
         let mut rdr = Cursor::new(&msg);
         let aud_header = rdr.read_u8().unwrap();
@@ -66,10 +66,30 @@ pub fn udp_recv_loop<'a>(remote_sessions: Arc<Mutex<HashMap<u64, std::boxed::Box
 
                 let mut opus_frame = Vec::<u8>::new();
                 rdr.read_to_end(&mut opus_frame).unwrap();
+
+                let crypt_len =  opus_frame.len();
+                // let mut data = if crypt_len > 4 {
+                //     let mut data = vec![0u8; crypt_len - 4];
+                //     let mut crypt_state = crypt_state.lock().unwrap();
+                //     if crypt_state.decrypt(&opus_frame[..], &mut data) {
+                //         data
+                //     }
+                //     else {
+                //         vec![0u8; 12]
+                //     }
+                // }
+                // else {
+                //     vec![0u8; 12]
+                // };
+
+                let mut data = vec![0u8; crypt_len - 4];
+                let mut crypt_state = crypt_state.lock().unwrap();
+                crypt_state.decrypt(&opus_frame[..], &mut data);
+
                 let (pcm, _done) = {
                     let mut remote_sessions = remote_sessions.lock().unwrap();
                     let remote_session = remote_sessions.get_mut(&aud_session).unwrap();
-                    util::opus_decode(remote_session, opus_frame)
+                    util::opus_decode(remote_session, data)
                 };
 
                 vox_inp_tx.send(pcm)
@@ -102,12 +122,13 @@ pub fn udp_ping(mum_tx: futures::sync::mpsc::Sender<Vec<u8>>, crypt_state: Arc<M
 
             let timestamp = chrono::UTC::now().timestamp() as u64;
 
-            let mut buf = Vec::new();
-            buf.push(0b00100000);
-            buf.write_varint(timestamp).unwrap();
-            let buf = {
+            let mut data = Vec::new();
+            data.push(0b00100000);
+            data.write_varint(timestamp).unwrap();
+            let mut buf = vec![0u8; data.len() + 4];
+            {
                 let mut crypt_state = crypt_state.lock().unwrap();
-                crypt_state.encrypt(&buf[..])
+                crypt_state.encrypt(&data[..], &mut buf[..])
             };
 
             tx.send(buf)

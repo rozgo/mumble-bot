@@ -13,6 +13,7 @@ extern crate tokio_io;
 extern crate tokio_timer;
 extern crate protobuf;
 extern crate byteorder;
+extern crate rand;
 extern crate opus;
 extern crate chrono;
 extern crate ocbaes128;
@@ -135,9 +136,10 @@ pub fn say<'a>(vox_out_rx: futures::sync::mpsc::Receiver<Vec<u8>>,
             data.write_varint(opus_len).unwrap();
             data.write_all(&frame).unwrap();
 
-            let buf = {
+            let mut buf = vec![0u8; data.len() + 4];
+            {
                 let mut crypt_state = crypt_state.lock().unwrap();
-                crypt_state.encrypt(&data[..])
+                crypt_state.encrypt(&data[..], &mut buf[..])
             };
 
             udp_tx.send(buf)
@@ -169,6 +171,11 @@ pub fn say_test(vox_out_tx: futures::sync::mpsc::Sender<Vec<u8>>) {
     }
 }
 
+pub fn udp_crypt() -> Arc<Mutex<ocbaes128::CryptState>> {
+    let crypt_state = ocbaes128::CryptState::new();
+    Arc::new(Mutex::new(crypt_state))
+}
+
 pub fn cmd() {
     pretty_env_logger::init().unwrap();
 
@@ -182,12 +189,12 @@ pub fn cmd() {
         toml::from_str(&config).unwrap()
     };
 
-    let mumble_server = &config.mumble.server;
+    let local_addr: SocketAddr = String::from("192.168.0.39:0").parse().unwrap();
+    let mumble_server: SocketAddr = config.mumble.server.parse().unwrap();
     let mut core = Core::new().unwrap();
     let handle = core.handle();
 
-    let crypt_state = ocbaes128::CryptState::new();
-    let crypt_state = Arc::new(Mutex::new(crypt_state));
+    let crypt_state = udp_crypt();
 
     let (vox_out_tx, vox_out_rx) = futures::sync::mpsc::channel::<Vec<u8>>(1000);
     let (vox_inp_tx, vox_inp_rx) = futures::sync::mpsc::channel::<Vec<u8>>(1000);
@@ -196,7 +203,7 @@ pub fn cmd() {
     })
     .map_err(|_| Error::new(ErrorKind::Other, "vox_inp_task"));
 
-    let (app_logic, _tcp_tx, udp_tx) = run(mumble_server, vox_inp_tx.clone(), Arc::clone(&crypt_state), &handle);
+    let (app_logic, _tcp_tx, udp_tx) = run(local_addr, mumble_server, vox_inp_tx.clone(), Arc::clone(&crypt_state), &handle);
 
     let say_task = say(vox_out_rx, udp_tx.clone(), Arc::clone(&crypt_state));
 
@@ -208,7 +215,7 @@ pub fn cmd() {
     core.run(tasks).unwrap();
 }
 
-pub fn run<'a>(mumble_server: &'a String,
+pub fn run<'a>(local_addr: SocketAddr, mumble_server: SocketAddr,
                vox_inp_tx: futures::sync::mpsc::Sender<Vec<u8>>,
                crypt_state: Arc<Mutex<ocbaes128::CryptState>>,
                handle: &tokio_core::reactor::Handle)
@@ -216,15 +223,14 @@ pub fn run<'a>(mumble_server: &'a String,
                    futures::sync::mpsc::Sender<Vec<u8>>,
                    futures::sync::mpsc::Sender<Vec<u8>>) {
 
-    let udp_local_addr = String::from("192.168.1.7:0");
-    let udp_server_addr: SocketAddr = mumble_server.parse().unwrap();
-    let udp_local_addr: SocketAddr = udp_local_addr.parse().unwrap();
+    let udp_server_addr: SocketAddr = mumble_server;
+    let udp_local_addr: SocketAddr = local_addr;
     let udp_socket = UdpSocket::bind(&udp_local_addr, &handle).unwrap();
     let (udp_socket_tx, udp_socket_rx) = udp_socket.framed(udp::AudioPacker).split();
     let (udp_tx, udp_rx) = futures::sync::mpsc::channel::<Vec<u8>>(0);
     let udp_tx0 = udp_tx.clone();
 
-    let tcp_server_addr = mumble_server.parse::<SocketAddr>().unwrap();
+    let tcp_server_addr: SocketAddr = mumble_server;
     let (tcp_tx, tcp_rx) = futures::sync::mpsc::channel::<Vec<u8>>(1000);
     let tcp_tx0 = tcp_tx.clone();
 
@@ -236,7 +242,7 @@ pub fn run<'a>(mumble_server: &'a String,
         //assert!(ctx.set_certificate_file(&path, X509_FILETYPE_PEM).is_ok());
         let ctx = ctx.build();
         let connector = MumbleConnector(ctx);
-        connector.connect_async(mumble_server, socket)
+        connector.connect_async(&format!("{}:{}", mumble_server.ip(), mumble_server.port()), socket)
         .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))
 
     }).and_then(|stream| { // Version
@@ -259,7 +265,7 @@ pub fn run<'a>(mumble_server: &'a String,
 
     }).and_then(|(stream, _)| { // Authenticate
         let mut auth = mumble::Authenticate::new();
-        auth.set_username("mumbot".to_string());
+        auth.set_username(format!("mumbot-{}", (10000 as usize).wrapping_add(rand::random::<usize>())));
         auth.set_opus(true);
         let s = auth.compute_size();
         let mut buf = vec![0u8; (s + 6) as usize];
