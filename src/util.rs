@@ -45,8 +45,11 @@ pub fn opus_decode(remote_session: &mut Box<session::Remote>, opus_frame: Vec<u8
         let opus_length = opus_header & 0x1FFF;
         println!("opus length: {} done: {}", opus_length, opus_done);
         let mut segment = vec![0u8; opus_length as usize];
-        rdr.read_exact(&mut segment[..]).unwrap();
-        opus_frame.write_all(&segment).unwrap();
+        match rdr.read_exact(&mut segment[..]) {
+            Ok(()) => opus_frame.write_all(&segment).unwrap(),
+            Err(err) => println!("{}", err),
+        };
+        
         println!("opus size: {}", opus_length);
         segments = segments + 1;
     }
@@ -58,8 +61,8 @@ pub fn opus_decode(remote_session: &mut Box<session::Remote>, opus_frame: Vec<u8
     let size: usize =
         match remote_session.decoder.decode(&opus_frame[..], &mut sample_pcm[..], false) {
             Ok(size) => size,
-            Err(e) => {
-                println!("{}", e); 0},
+            Err(err) => {
+                println!("{}", err); 0},
         };
 
     println!("pcm size: {}", size);
