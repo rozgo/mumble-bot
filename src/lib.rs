@@ -191,7 +191,8 @@ pub fn cmd() {
 
     let (vox_out_tx, vox_out_rx) = futures::sync::mpsc::channel::<Vec<u8>>(1000);
     let (vox_inp_tx, vox_inp_rx) = futures::sync::mpsc::channel::<Vec<u8>>(1000);
-    let vox_inp_task = vox_inp_rx.fold((), |_, _| {
+    let vox_inp_task = vox_inp_rx.fold((), |_, bytes| {
+        println!("vox_inp_rx bytes: {}", bytes.len());
         ok::<(), ()>(())
     })
     .map_err(|_| Error::new(ErrorKind::Other, "vox_inp_task"));
