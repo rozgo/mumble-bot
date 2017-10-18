@@ -37,11 +37,7 @@ pub fn opus_decode(decoder: &mut opus::Decoder, opus_frame: Vec<u8>) -> (Vec<u8>
 
     let mut opus_done = false;
     while let Ok(opus_header) = rdr.read_varint() {
-        opus_done = if opus_header & 0x2000 == 0x2000 {
-            true
-        } else {
-            false
-        };
+        opus_done = opus_header & 0x2000 == 0x2000;
         let opus_length = opus_header & 0x1FFF;
         println!("opus length: {} done: {}", opus_length, opus_done);
         let mut segment = vec![0u8; opus_length as usize];
@@ -50,7 +46,7 @@ pub fn opus_decode(decoder: &mut opus::Decoder, opus_frame: Vec<u8>) -> (Vec<u8>
             Err(err) => println!("{}", err),
         };
         
-        println!("opus size: {}", opus_length);
+        println!("opus size: {} segment: {}", opus_length, segments);
         segments = segments + 1;
     }
 

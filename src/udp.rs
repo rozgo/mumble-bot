@@ -71,7 +71,7 @@ impl UdpCodec for AudioPacketCodec {
                 let sequence = rdr.read_varint().unwrap();
                 println!("audio packet type: OPUS target: {} sequence: {}", aud_target, sequence);
                 if sequence > self.decoder_sequence {
-                    self.decoder_sequence = rdr.read_varint().unwrap();
+                    self.decoder_sequence = sequence;
                     let mut opus_frame = Vec::<u8>::new();
                     rdr.read_to_end(&mut opus_frame).unwrap();
                     let (data, _done) = util::opus_decode(&mut self.opus_decoder, opus_frame);
