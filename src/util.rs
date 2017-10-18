@@ -26,7 +26,7 @@ use protobuf::{CodedOutputStream, CodedInputStream};
 use session;
 
 
-pub fn opus_decode(remote_session: &mut Box<session::Remote>, opus_frame: Vec<u8>) -> (Vec<u8>, bool) {
+pub fn opus_decode(decoder: &mut opus::Decoder, opus_frame: Vec<u8>) -> (Vec<u8>, bool) {
 
     println!("!!__@__!!__@__!!__@__!!__@__!!__@__!!__@__!!__@__!!__@__!!__@__!!__@__");
 
@@ -59,7 +59,7 @@ pub fn opus_decode(remote_session: &mut Box<session::Remote>, opus_frame: Vec<u8
     let mut sample_pcm = vec![0i16; 320 * segments];
 
     let size: usize =
-        match remote_session.decoder.decode(&opus_frame[..], &mut sample_pcm[..], false) {
+        match decoder.decode(&opus_frame[..], &mut sample_pcm[..], false) {
             Ok(size) => size,
             Err(err) => {
                 println!("{}", err); 0},

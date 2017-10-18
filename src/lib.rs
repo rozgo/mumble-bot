@@ -86,8 +86,7 @@ fn app() -> App<'static, 'static> {
 }
 
 pub fn say<'a>(vox_out_rx: futures::sync::mpsc::Receiver<Vec<u8>>,
-               udp_tx: futures::sync::mpsc::Sender<Vec<u8>>,
-               crypt_state: Arc<Mutex<ocbaes128::CryptState>>)
+               udp_tx: futures::sync::mpsc::Sender<udp::AudioOutPacket>)
                -> impl Future<Item = (), Error = Error> + 'a {
 
     // Hz * channel * ms / 1000
@@ -95,17 +94,6 @@ pub fn say<'a>(vox_out_rx: futures::sync::mpsc::Receiver<Vec<u8>>,
     let sample_rate: u32 = 16000;
     let sample_ms: u32 = 10;
     let sample_size: u32 = sample_rate * sample_channels * sample_ms / 1000;
-
-    println!("sample channels: {} rate: {} ms: {} size: {}",
-             sample_channels,
-             sample_rate,
-             sample_ms,
-             sample_size);
-
-    let mut encoder =
-        opus::Encoder::new(sample_rate, opus::Channels::Mono, opus::Application::Voip).unwrap();
-
-    let mut sequence = chrono::UTC::now().timestamp() as u64;
 
     vox_out_rx.map(|segment| futures::stream::iter_ok::<_, ()>(segment))
         .flatten()
@@ -118,31 +106,8 @@ pub fn say<'a>(vox_out_rx: futures::sync::mpsc::Receiver<Vec<u8>>,
         .fold(udp_tx, move |udp_tx, chunk| {
             let mut chunk = Vec::from(chunk);
             chunk.resize(sample_size as usize, 0);
-            let frame = encoder.encode_vec(&chunk, 4000).unwrap();
-
-            sequence = sequence + 1;
-
-            let done = false;
-
-            let aud_header = 0b100 << 5;
-            let mut data = Vec::<u8>::new();
-            data.write_u8(aud_header).unwrap();
-            data.write_varint(sequence).unwrap();
-            let opus_len = if done {
-                frame.len() as u64 | 0x2000
-            } else {
-                frame.len() as u64
-            };
-            data.write_varint(opus_len).unwrap();
-            data.write_all(&frame).unwrap();
-
-            let mut buf = vec![0u8; data.len() + 4];
-            {
-                let mut crypt_state = crypt_state.lock().unwrap();
-                crypt_state.encrypt(&data, &mut buf)
-            };
-
-            udp_tx.send(buf)
+            let packet = udp::AudioOutPacket {type_: 0b100, target: 0, pcm: chunk, done: false, timestamp: 0};
+            udp_tx.send(packet)
                 .map_err(|_| ())
         })
         .map(|_| ())
@@ -173,11 +138,6 @@ pub fn say_test(vox_out_tx: futures::sync::mpsc::Sender<Vec<u8>>) {
     println!("END: say_test");
 }
 
-pub fn udp_crypt() -> Arc<Mutex<ocbaes128::CryptState>> {
-    let crypt_state = ocbaes128::CryptState::new();
-    Arc::new(Mutex::new(crypt_state))
-}
-
 pub fn cmd() {
     pretty_env_logger::init().unwrap();
 
@@ -196,8 +156,6 @@ pub fn cmd() {
     let mut core = Core::new().unwrap();
     let handle = core.handle();
 
-    let crypt_state = udp_crypt();
-
     let (vox_out_tx, vox_out_rx) = futures::sync::mpsc::channel::<Vec<u8>>(1000);
     let (vox_inp_tx, vox_inp_rx) = futures::sync::mpsc::channel::<Vec<u8>>(1000);
     let vox_inp_task = vox_inp_rx.fold((), |_, bytes| {
@@ -206,9 +164,9 @@ pub fn cmd() {
     })
     .map_err(|_| Error::new(ErrorKind::Other, "vox_inp_task"));
 
-    let (app_logic, _tcp_tx, udp_tx) = run(local_addr, mumble_server, vox_inp_tx.clone(), Arc::clone(&crypt_state), &handle);
+    let (app_logic, _tcp_tx, udp_tx) = run(local_addr, mumble_server, vox_inp_tx.clone(), &handle);
 
-    let say_task = say(vox_out_rx, udp_tx.clone(), Arc::clone(&crypt_state));
+    let say_task = say(vox_out_rx, udp_tx.clone());
 
     std::thread::spawn(move || {
         say_test(vox_out_tx.clone());
@@ -220,17 +178,24 @@ pub fn cmd() {
 
 pub fn run<'a>(local_addr: SocketAddr, mumble_server: SocketAddr,
                vox_inp_tx: futures::sync::mpsc::Sender<Vec<u8>>,
-               crypt_state: Arc<Mutex<ocbaes128::CryptState>>,
                handle: &tokio_core::reactor::Handle)
                -> (impl Future<Item = (), Error = Error> + 'a,
                    futures::sync::mpsc::Sender<Vec<u8>>,
-                   futures::sync::mpsc::Sender<Vec<u8>>) {
+                   futures::sync::mpsc::Sender<udp::AudioOutPacket>) {
+
+    let crypt_state = Arc::new(Mutex::new(ocbaes128::CryptState::new()));
+    let udp_codec = udp::AudioPacketCodec {
+        opus_encoder: opus::Encoder::new(16000, opus::Channels::Mono, opus::Application::Voip).unwrap(),
+        opus_decoder: opus::Decoder::new(16000, opus::Channels::Mono).unwrap(),
+        crypt_state: Arc::clone(&crypt_state),
+        encoder_sequence: 0,
+        decoder_sequence: 0};
 
     let udp_server_addr: SocketAddr = mumble_server;
     let udp_local_addr: SocketAddr = local_addr;
     let udp_socket = UdpSocket::bind(&udp_local_addr, &handle).unwrap();
-    let (udp_socket_tx, udp_socket_rx) = udp_socket.framed(udp::AudioPacker).split();
-    let (udp_tx, udp_rx) = futures::sync::mpsc::channel::<Vec<u8>>(0);
+    let (udp_socket_tx, udp_socket_rx) = udp_socket.framed(udp_codec).split();
+    let (udp_tx, udp_rx) = futures::sync::mpsc::channel::<udp::AudioOutPacket>(0);
     let udp_tx0 = udp_tx.clone();
 
     let tcp_server_addr: SocketAddr = mumble_server;
@@ -268,7 +233,7 @@ pub fn run<'a>(local_addr: SocketAddr, mumble_server: SocketAddr,
 
     }).and_then(|(stream, _)| { // Authenticate
         let mut auth = mumble::Authenticate::new();
-        auth.set_username(format!("mumbot-{}", (10000 as usize).wrapping_add(rand::random::<usize>())));
+        auth.set_username(format!("mumbot-{}", (10000 as u16).wrapping_add(rand::random::<u16>())));
         auth.set_opus(true);
         let s = auth.compute_size();
         let mut buf = vec![0u8; (s + 6) as usize];
@@ -298,12 +263,10 @@ pub fn run<'a>(local_addr: SocketAddr, mumble_server: SocketAddr,
         .map_err(|_| Error::new(ErrorKind::Other, "writing to udp"));
 
         let tcp_ping = tcp::tcp_ping(tcp_tx.clone());
-        let udp_ping = udp::udp_ping(udp_tx.clone(), Arc::clone(&crypt_state));
+        let udp_ping = udp::udp_ping(udp_tx.clone());
 
-        let remotes = Arc::new(Mutex::new(session::Remotes::new()));
-
-        let tcp_recv_loop = tcp::tcp_recv_loop(Arc::clone(&remotes), tcp_socket_rx, tcp_tx, vox_inp_tx.clone(), Arc::clone(&crypt_state));
-        let udp_recv_loop = udp::udp_recv_loop(Arc::clone(&remotes), udp_socket_rx, udp_tx, vox_inp_tx.clone(), Arc::clone(&crypt_state));
+        let tcp_recv_loop = tcp::tcp_recv_loop(tcp_socket_rx, tcp_tx, vox_inp_tx.clone(), Arc::clone(&crypt_state));
+        let udp_recv_loop = udp::udp_recv_loop(udp_socket_rx, udp_tx, vox_inp_tx.clone());
 
         let send_tasks = Future::join(tcp_writer, udp_writer);
         let ping_tasks = Future::join(tcp_ping, udp_ping);
