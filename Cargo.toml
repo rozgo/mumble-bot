@@ -32,7 +32,7 @@ serde_derive = "1.0"
 sample = "*"
 # ocb = { git = "https://github.com/rozgo/ocb.rs.git" }
 # ocb = { path = "../ocb.rs" }
-ocbaes128 = { path = "../ocbaes128-rs" }
+ocbaes128 = { path = "../OCB-AES128" }
 
 [lib]
 name = "mumblebot"

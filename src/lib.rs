@@ -151,8 +151,8 @@ pub fn cmd() {
         toml::from_str(&config).unwrap()
     };
 
-    let local_addr: SocketAddr = String::from("192.168.1.7:0").parse().unwrap();
-    let mumble_server: SocketAddr = config.mumble.server.parse().unwrap();
+    let local_addr: SocketAddr = String::from("192.168.0.39:0").parse().unwrap();
+    let mumble_addr: SocketAddr = config.mumble.server.parse().unwrap();
     let mut core = Core::new().unwrap();
     let handle = core.handle();
 
@@ -164,7 +164,7 @@ pub fn cmd() {
     })
     .map_err(|_| Error::new(ErrorKind::Other, "vox_inp_task"));
 
-    let (app_logic, _tcp_tx, udp_tx) = run(local_addr, mumble_server, vox_inp_tx.clone(), &handle);
+    let (app_logic, _tcp_tx, udp_tx) = run(local_addr, mumble_addr, vox_inp_tx.clone(), &handle);
 
     let say_task = say(vox_out_rx, udp_tx.clone());
 
@@ -176,7 +176,7 @@ pub fn cmd() {
     core.run(tasks).unwrap();
 }
 
-pub fn run<'a>(local_addr: SocketAddr, mumble_server: SocketAddr,
+pub fn run<'a>(local_addr: SocketAddr, mumble_addr: SocketAddr,
                vox_inp_tx: futures::sync::mpsc::Sender<Vec<u8>>,
                handle: &tokio_core::reactor::Handle)
                -> (impl Future<Item = (), Error = Error> + 'a,
@@ -191,26 +191,26 @@ pub fn run<'a>(local_addr: SocketAddr, mumble_server: SocketAddr,
         encoder_sequence: 0,
         decoder_sequence: 0};
 
-    let udp_server_addr: SocketAddr = mumble_server;
+    let udp_server_addr: SocketAddr = mumble_addr;
     let udp_local_addr: SocketAddr = local_addr;
     let udp_socket = UdpSocket::bind(&udp_local_addr, &handle).unwrap();
     let (udp_socket_tx, udp_socket_rx) = udp_socket.framed(udp_codec).split();
-    let (udp_tx, udp_rx) = futures::sync::mpsc::channel::<udp::AudioOutPacket>(0);
+    let (udp_tx, udp_rx) = futures::sync::mpsc::channel::<udp::AudioOutPacket>(1000);
     let udp_tx0 = udp_tx.clone();
 
-    let tcp_server_addr: SocketAddr = mumble_server;
+    let tcp_server_addr: SocketAddr = mumble_addr;
     let (tcp_tx, tcp_rx) = futures::sync::mpsc::channel::<Vec<u8>>(1000);
     let tcp_tx0 = tcp_tx.clone();
 
     let comm = TcpStream::connect(&tcp_server_addr, &handle).and_then(move|socket| {
-        println!("Connecting to mumble_server: {}", mumble_server);
+        println!("Connecting to mumble_server: {}", mumble_addr);
 //        let path = Path::new("mumble.pem");
         let mut ctx = SslContext::builder(SslMethod::tls()).unwrap();
         ctx.set_verify_callback(SSL_VERIFY_PEER, |_, _| true);
         //assert!(ctx.set_certificate_file(&path, X509_FILETYPE_PEM).is_ok());
         let ctx = ctx.build();
         let connector = MumbleConnector(ctx);
-        connector.connect_async(&format!("{}:{}", mumble_server.ip(), mumble_server.port()), socket)
+        connector.connect_async(&format!("{}:{}", mumble_addr.ip(), mumble_addr.port()), socket)
         .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))
 
     }).and_then(|stream| { // Version
