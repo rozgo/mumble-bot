@@ -29,7 +29,10 @@ rand = "0.3"
 serde = "1.0"
 serde_derive = "1.0"
 #warheadhateus = { git = "https://github.com/rozgo/warheadhateus.git" }
-sample="*"
+sample = "*"
+# ocb = { git = "https://github.com/rozgo/ocb.rs.git" }
+# ocb = { path = "../ocb.rs" }
+ocbaes128 = { path = "../OCB-AES128" }
 
 [lib]
 name = "mumblebot"
