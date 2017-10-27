@@ -2,6 +2,7 @@
 name = "mumblebot"
 version = "0.1.0"
 authors = ["Alex Rozgo <alex.rozgo@gmail.com>"]
+build = "build.rs"
 
 [dependencies]
 log = "0.3"
@@ -29,10 +30,28 @@ rand = "0.3"
 serde = "1.0"
 serde_derive = "1.0"
 #warheadhateus = { git = "https://github.com/rozgo/warheadhateus.git" }
+byte-slice-cast = "0.1"
 sample = "*"
 # ocb = { git = "https://github.com/rozgo/ocb.rs.git" }
 # ocb = { path = "../ocb.rs" }
 ocbaes128 = { path = "../OCB-AES128" }
+glib = { version = "0.3", git = "https://github.com/gtk-rs/glib" }
+gstreamer = {git = "https://github.com/sdroege/gstreamer-rs.git" }
+gstreamer-app = {git = "https://github.com/sdroege/gstreamer-rs.git" }
+gstreamer-audio = {git = "https://github.com/sdroege/gstreamer-rs.git" }
+# gstreamer-base = {git = "https://github.com/sdroege/gstreamer-rs.git" }
+# gstreamer-player = {git = "https://github.com/sdroege/gstreamer-rs.git" }
+# gstreamer-video = {git = "https://github.com/sdroege/gstreamer-rs.git" }
+
+# [features]
+# # gst-player = ["gstreamer-player"]
+# # gtksink = ["gtk", "gio"]
+# # gtkvideooverlay = ["gtk", "gdk", "gio"]
+# # gtkvideooverlay-x11 = ["gtkvideooverlay"]
+# # gtkvideooverlay-quartz = ["gtkvideooverlay"]
+# # tokio = ["gstreamer/futures", "futures", "tokio-core"]
+# tokio = ["gstreamer/futures"]
+# default-features = []
 
 [lib]
 name = "mumblebot"

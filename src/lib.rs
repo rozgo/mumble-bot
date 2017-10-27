@@ -52,17 +52,13 @@ use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
 
 mod udp;
 mod tcp;
-
 mod mumble;
 mod connector;
 use connector::MumbleConnector;
-
 mod session;
-
 mod varint;
 use varint::VarintReader;
 use varint::VarintWriter;
-
 mod rnd;
 mod config;
 mod util;

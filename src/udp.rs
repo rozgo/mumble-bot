@@ -62,7 +62,7 @@ impl UdpCodec for AudioPacketCodec {
         let mut rdr = Cursor::new(&data);
         let aud_header = rdr.read_u8().unwrap();
         // println!("incoming aud_header: {}", aud_header);
-        let mut aud_type = (aud_header & 0b11100000) >> 5;
+        let aud_type = (aud_header & 0b11100000) >> 5;
         let aud_target = aud_header & 0b00011111;
 
         let data = match aud_type {
