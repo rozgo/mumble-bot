@@ -5,6 +5,5 @@ mod gst;
 mod utils;
 
 pub fn main() {
-    //cmd();
-    gst::gst_main();
+    cmd();
 }

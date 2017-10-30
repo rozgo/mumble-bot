@@ -20,8 +20,8 @@ futures = "0.1"
 native-tls = "0.1"
 tokio-tls = "0.1"
 varint = "0.9.0"
-opus = { git = "https://github.com/rozgo/opus-rs.git", branch = "windows_vs" }
-#opus = { path = "../opus-rs" }
+# opus = { git = "https://github.com/rozgo/opus-rs.git", branch = "windows_vs" }
+opus = { path = "../opus-rs" }
 hyper = "0.11"
 hyper-tls = "0.1"
 pretty_env_logger = "0.1"
@@ -36,12 +36,13 @@ sample = "*"
 # ocb = { path = "../ocb.rs" }
 ocbaes128 = { path = "../OCB-AES128" }
 glib = { version = "0.3", git = "https://github.com/gtk-rs/glib" }
+gio = { version = "0.2", git = "https://github.com/gtk-rs/gio" }
 gstreamer = {git = "https://github.com/sdroege/gstreamer-rs.git" }
 gstreamer-app = {git = "https://github.com/sdroege/gstreamer-rs.git" }
 gstreamer-audio = {git = "https://github.com/sdroege/gstreamer-rs.git" }
-# gstreamer-base = {git = "https://github.com/sdroege/gstreamer-rs.git" }
-# gstreamer-player = {git = "https://github.com/sdroege/gstreamer-rs.git" }
-# gstreamer-video = {git = "https://github.com/sdroege/gstreamer-rs.git" }
+gstreamer-base = {git = "https://github.com/sdroege/gstreamer-rs.git" }
+gstreamer-player = {git = "https://github.com/sdroege/gstreamer-rs.git" }
+gstreamer-video = {git = "https://github.com/sdroege/gstreamer-rs.git" }
 
 # [features]
 # # gst-player = ["gstreamer-player"]

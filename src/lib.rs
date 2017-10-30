@@ -63,6 +63,9 @@ mod rnd;
 mod config;
 mod util;
 
+mod gst;
+mod utils;
+
 
 fn app() -> App<'static, 'static> {
     App::new("mmo-mumble")
@@ -112,8 +115,6 @@ pub fn say<'a>(vox_out_rx: futures::sync::mpsc::Receiver<Vec<u8>>,
 
 pub fn say_test(vox_out_tx: futures::sync::mpsc::Sender<Vec<u8>>) {
 
-    std::thread::sleep(std::time::Duration::from_secs(5));
-
     // // Hz * channel * ms / 1000
     let sample_channels: u32 = 1;
     let sample_rate: u32 = 16000;
@@ -147,7 +148,7 @@ pub fn cmd() {
         toml::from_str(&config).unwrap()
     };
 
-    let local_addr: SocketAddr = String::from("192.168.0.39:0").parse().unwrap();
+    let local_addr: SocketAddr = String::from("192.168.0.27:0").parse().unwrap();
     let mumble_addr: SocketAddr = config.mumble.server.parse().unwrap();
     let mut core = Core::new().unwrap();
     let handle = core.handle();
@@ -165,7 +166,9 @@ pub fn cmd() {
     let say_task = say(vox_out_rx, udp_tx.clone());
 
     std::thread::spawn(move || {
-        say_test(vox_out_tx.clone());
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        gst::gst_main(vox_out_tx.clone());
+        // say_test(vox_out_tx.clone());
     });
 
     let tasks = Future::join3(app_logic, say_task, vox_inp_task);
