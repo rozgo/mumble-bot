@@ -69,7 +69,7 @@ mod rnd;
 mod config;
 mod util;
 
-mod gst;
+pub mod gst;
 mod utils;
 
 
