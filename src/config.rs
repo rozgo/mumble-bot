@@ -7,6 +7,7 @@ pub struct Config {
 
 #[derive(Serialize, Deserialize)]
 pub struct Mumble {
+    pub local: String,
     pub server: String,
 }
 

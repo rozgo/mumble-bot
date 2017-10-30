@@ -2,6 +2,12 @@
 #![allow(unused_imports)]
 #![feature(conservative_impl_trait)]
 
+extern crate gstreamer;
+extern crate gstreamer_app;
+extern crate gstreamer_audio;
+extern crate glib;
+extern crate byte_slice_cast;
+
 extern crate pretty_env_logger;
 #[macro_use]
 extern crate log;
@@ -148,28 +154,26 @@ pub fn cmd() {
         toml::from_str(&config).unwrap()
     };
 
-    let local_addr: SocketAddr = String::from("192.168.0.27:0").parse().unwrap();
+    let local_addr: SocketAddr = config.mumble.local.parse().unwrap();
     let mumble_addr: SocketAddr = config.mumble.server.parse().unwrap();
     let mut core = Core::new().unwrap();
     let handle = core.handle();
 
     let (vox_out_tx, vox_out_rx) = futures::sync::mpsc::channel::<Vec<u8>>(1000);
     let (vox_inp_tx, vox_inp_rx) = futures::sync::mpsc::channel::<Vec<u8>>(1000);
-    let vox_inp_task = vox_inp_rx.fold((), |_, bytes| {
-        println!("vox_inp_rx bytes: {}", bytes.len());
-        ok::<(), ()>(())
-    })
-    .map_err(|_| Error::new(ErrorKind::Other, "vox_inp_task"));
 
     let (app_logic, _tcp_tx, udp_tx) = run(local_addr, mumble_addr, vox_inp_tx.clone(), &handle);
 
     let say_task = say(vox_out_rx, udp_tx.clone());
 
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_secs(5));
-        gst::gst_main(vox_out_tx.clone());
-        // say_test(vox_out_tx.clone());
-    });
+    // let vox_out_tx0 = vox_out_tx.clone();
+    // std::thread::spawn(|| {
+    //     std::thread::sleep(std::time::Duration::from_secs(5));
+    //     say_test(vox_out_tx0);
+    // });
+
+    gst::sink_main(vox_out_tx.clone());
+    let vox_inp_task = gst::src_main(vox_inp_rx);
 
     let tasks = Future::join3(app_logic, say_task, vox_inp_task);
     core.run(tasks).unwrap();

@@ -4,15 +4,5 @@ use std::io::Write;
 use std::path::Path;
 
 fn main() {
-    let out_dir = env::var("OUT_DIR").unwrap();
-    let dest_path = Path::new(&out_dir).join("hello.rs");
-    let mut f = File::create(&dest_path).unwrap();
-
-    f.write_all(b"
-        pub fn message() -> &'static str {
-            \"Hello, World!\"
-        }
-    ").unwrap();
-
     println!("cargo:rustc-link-search=native={}", "C:\\gstreamer\\1.0\\x86_64\\lib");
 }

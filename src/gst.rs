@@ -1,43 +1,25 @@
-// extern crate gstreamer as gst;
-// use gst::prelude::*;
-// use gst::BinExtManual;
-// use gst::byte_slice_cast::AsSliceOf;
-
-extern crate gstreamer as gst;
+use gstreamer as gst;
+use gstreamer_app as gst_app;
+use gstreamer_audio as gst_audio;
 use self::gst::prelude::*;
 
-extern crate gstreamer_app as gst_app;
-extern crate gstreamer_audio as gst_audio;
-
-extern crate glib;
-
-extern crate byte_slice_cast;
-use self::byte_slice_cast::*;
+use byte_slice_cast::*;
 
 use std::i16;
 use std::i32;
+use std::io::{Error, ErrorKind};
+use std::thread;
 
 use utils;
 
-extern crate futures;
-use self::futures::{Sink, Stream};
-use self::futures::future::{Future, ok, loop_fn, IntoFuture, Loop};
+use futures;
+use futures::{Sink, Stream};
+use futures::future::{Future, err, ok, loop_fn, IntoFuture, Loop};
 
-fn create_pipeline(vox_out_tx: futures::sync::mpsc::Sender<Vec<u8>>) -> Result<gst::Pipeline, utils::ExampleError> {
+fn sink_pipeline(vox_out_tx: futures::sync::mpsc::Sender<Vec<u8>>) -> Result<gst::Pipeline, utils::ExampleError> {
     gst::init().map_err(utils::ExampleError::InitFailed)?;
     let pipeline = gst::Pipeline::new(None);
-    let uri : &str = "/Users/rozgo/Projects/mumble-bot/data/man16kHz.raw";
-
-    // let src = utils::create_element("audiotestsrc")?;
-    // src.set_property("wave", 2).unwrap();
-    // src.set_property("freq", &(200.0)).unwrap();
-
-    // let src = utils::create_element("filesrc")?;
-    let src = utils::create_element("osxaudiosrc")?;
-    // let src = gst::ElementFactory::make("osxaudiosrc", None).unwrap();
-
-    // let src = utils::create_element("filesrc")?;
-    // src.set_property("location", &glib::Value::from(uri)).unwrap();
+    let src = utils::create_element("autoaudiosrc")?;
 
     let resample = utils::create_element("audioresample")?;
 
@@ -47,47 +29,28 @@ fn create_pipeline(vox_out_tx: futures::sync::mpsc::Sender<Vec<u8>>) -> Result<g
             ("format", &gst_audio::AUDIO_FORMAT_S16.to_string()),
             ("layout", &"interleaved"),
             ("channels", &(1i32)),
-            // ("rate", &gst::IntRange::<i32>::new(1, i32::MAX)),
             ("rate", &(16000i32)),
         ],
     );
 
     let caps_filter = utils::create_element("capsfilter")?;
-
-    // let caps = caps_filter.clone()
-    //     .dynamic_cast::<gst_app::AppSink>()
-    //     .expect("Sink element is expected to be an appsink!");
-    // caps_filter.set_caps(&gst::Caps::new_simple(
-    //     "audio/x-raw",
-    //     &[
-    //         ("format", &gst_audio::AUDIO_FORMAT_S16.to_string()),
-    //         ("layout", &"interleaved"),s
-    //         ("channels", &(1i32)),
-    //         // ("rate", &gst::IntRange::<i32>::new(1, i32::MAX)),
-    //         ("rate", &(16000i32)),
-    //     ],
-    // ));
     if let Err(err) = caps_filter.set_property("caps", &caps) {
-        println!("caps_filter.set_property:caps {:?}", err);
+        panic!("caps_filter.set_property:caps {:?}", err);
     }
 
     let sink = utils::create_element("appsink")?;
 
     if let Err(err) = pipeline.add_many(&[&src, &resample, &caps_filter, &sink]) {
-        println!("pipeline.add_many {:?}", err);
+        panic!("pipeline.add_many {:?}", err);
     }
 
-    // utils::link_elements(&src, &sink)?;
-
-    if let Err(err) = gst::Element::link_many(&[&src, &resample, &caps_filter, &sink]) {
-        println!("gst::Element::link_many {:?}", err);
-    }
+    utils::link_elements(&src, &resample)?;
+    utils::link_elements(&resample, &caps_filter)?;
+    utils::link_elements(&caps_filter, &sink)?;
 
     let appsink = sink.clone()
         .dynamic_cast::<gst_app::AppSink>()
         .expect("Sink element is expected to be an appsink!");
-
-    println!("appsink {:?}", appsink);
 
     appsink.set_caps(&caps);
 
@@ -116,35 +79,29 @@ fn create_pipeline(vox_out_tx: futures::sync::mpsc::Sender<Vec<u8>>) -> Result<g
                     let v = samples.to_vec();
                     let tx0 = vox_out_tx.send(v);
                     tx0.wait().unwrap();
-                    // samples
                     return gst::FlowReturn::Ok;
             } else {
                 return gst::FlowReturn::Error;
             };
-
-            // let sum: f64 = samples
-            //     .iter()
-            //     .map(|sample| {
-            //         let f = f64::from(*sample) / f64::from(i16::MAX);
-            //         f * f
-            //     })
-            //     .sum();
-            // let rms = (sum / (samples.len() as f64)).sqrt();
-            // println!("rms: {}", rms);
-
-            
         },
     ));
-
-    println!("Ok(pipeline)");
 
     Ok(pipeline)
 }
 
-fn main_loop(vox_out_tx: futures::sync::mpsc::Sender<Vec<u8>>) -> Result<(), utils::ExampleError> {
-    let pipeline = create_pipeline(vox_out_tx)?;
+fn set_state(e: &gst::Pipeline, state: gst::State) -> Result<(), Error> {
+    if let gst::StateChangeReturn::Failure = e.set_state(state) {
+        return Err(Error::new(ErrorKind::Other,
+            gst::Element::state_get_name(state).unwrap()
+        ));
+    }
+    Ok(())
+}
 
-    utils::set_state(&pipeline, gst::State::Playing)?;
+fn sink_loop(vox_out_tx: futures::sync::mpsc::Sender<Vec<u8>>) -> Result<(), Error> {
+    let pipeline = sink_pipeline(vox_out_tx).unwrap();
+
+    set_state(&pipeline, gst::State::Playing)?;
 
     let bus = pipeline
         .get_bus()
@@ -156,26 +113,116 @@ fn main_loop(vox_out_tx: futures::sync::mpsc::Sender<Vec<u8>>) -> Result<(), uti
         match msg.view() {
             MessageView::Eos(..) => break,
             MessageView::Error(err) => {
-                // println!("Error! {:?}", err.to_str());
-                utils::set_state(&pipeline, gst::State::Null)?;
-                return Err(utils::ExampleError::ElementError(
+                set_state(&pipeline, gst::State::Null)?;
+                return Err(Error::new(ErrorKind::Other,
+                    format!("Error from {}: {} ({:?})",
                     msg.get_src().get_path_string(),
                     err.get_error(),
-                    err.get_debug().unwrap(),
-                ));
+                    err.get_debug().unwrap()
+                )));
             }
             _ => (),
         }
     }
 
-    utils::set_state(&pipeline, gst::State::Null)?;
+    set_state(&pipeline, gst::State::Null)?;
 
     Ok(())
 }
 
-pub fn gst_main(vox_out_tx: futures::sync::mpsc::Sender<Vec<u8>>) {
-    match main_loop(vox_out_tx) {
-        Ok(r) => r,
-        Err(e) => println!("Error! {}", e),
+pub fn sink_main(vox_out_tx: futures::sync::mpsc::Sender<Vec<u8>>) {
+    thread::spawn(move || {
+        sink_loop(vox_out_tx.clone()).unwrap();
+    });
+}
+
+fn src_pipeline() -> Result<(gst::Pipeline, gst_app::AppSrc), utils::ExampleError> {
+    gst::init().map_err(utils::ExampleError::InitFailed)?;
+
+    let pipeline = gst::Pipeline::new(None);
+    let src = utils::create_element("appsrc")?;
+    let audioconvert = utils::create_element("audioconvert")?;
+    let sink = utils::create_element("autoaudiosink")?;
+
+    pipeline
+        .add_many(&[&src, &audioconvert, &sink])
+        .expect("Unable to add elements in the pipeline");
+    utils::link_elements(&src, &audioconvert)?;
+    utils::link_elements(&audioconvert, &sink)?;
+
+    let appsrc = src.clone()
+        .dynamic_cast::<gst_app::AppSrc>()
+        .expect("Source element is expected to be an appsrc!");
+
+    let caps = gst::Caps::new_simple(
+        "audio/x-raw",
+        &[
+            ("format", &gst_audio::AUDIO_FORMAT_S16.to_string()),
+            ("layout", &"interleaved"),
+            ("channels", &(1i32)),
+            ("rate", &(16000i32)),
+        ],
+    );
+
+    appsrc.set_caps(&caps);
+
+    Ok((pipeline, appsrc))
+}
+
+fn src_rx<'a>(appsrc: gst_app::AppSrc, vox_inp_rx: futures::sync::mpsc::Receiver<Vec<u8>>)
+-> impl Future<Item = (), Error = Error> + 'a {
+    vox_inp_rx.fold((), move |_, bytes| {
+        let buffer = gst::Buffer::from_slice(bytes).unwrap();
+        //buffer.set_pts(i * 500 * gst::MSECOND);
+        if appsrc.push_buffer(buffer) != gst::FlowReturn::Ok {
+            appsrc.end_of_stream();
+            err(())
+        }
+        else {
+            ok(())
+        }
+    })
+    .map_err(|_| Error::new(ErrorKind::Other, "vox_inp_task"))
+}
+
+fn src_loop(pipeline: gst::Pipeline) -> Result<(), Error> {
+
+    set_state(&pipeline, gst::State::Playing)?;
+
+    let bus = pipeline
+        .get_bus()
+        .expect("Pipeline without bus. Shouldn't happen!");
+
+    while let Some(msg) = bus.timed_pop(gst::CLOCK_TIME_NONE) {
+        use self::gst::MessageView;
+
+        match msg.view() {
+            MessageView::Eos(..) => break,
+            MessageView::Error(err) => {
+                set_state(&pipeline, gst::State::Null)?;
+                return Err(Error::new(ErrorKind::Other,
+                    format!("Error from {}: {} ({:?})",
+                    msg.get_src().get_path_string(),
+                    err.get_error(),
+                    err.get_debug().unwrap()
+                )));
+            }
+            _ => (),
+        }
     }
+
+    set_state(&pipeline, gst::State::Null)?;
+
+    Ok(())
+}
+
+pub fn src_main<'a>(vox_inp_rx: futures::sync::mpsc::Receiver<Vec<u8>>)
+-> impl Future<Item = (), Error = Error> + 'a {
+    let (pipeline, appsrc) = src_pipeline().unwrap();
+
+    thread::spawn(move || {
+        src_loop(pipeline).unwrap();
+    });
+
+    src_rx(appsrc, vox_inp_rx)
 }
