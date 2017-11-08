@@ -28,7 +28,7 @@ use session;
 
 pub fn opus_decode(decoder: &mut opus::Decoder, opus_frame: Vec<u8>) -> (Vec<u8>, bool) {
 
-    println!("!!__@__!!__@__!!__@__!!__@__!!__@__!!__@__!!__@__!!__@__!!__@__!!__@__");
+    // println!("!!__@__!!__@__!!__@__!!__@__!!__@__!!__@__!!__@__!!__@__!!__@__!!__@__");
 
     let mut rdr = Cursor::new(opus_frame);
 
@@ -39,18 +39,18 @@ pub fn opus_decode(decoder: &mut opus::Decoder, opus_frame: Vec<u8>) -> (Vec<u8>
     while let Ok(opus_header) = rdr.read_varint() {
         opus_done = opus_header & 0x2000 == 0x2000;
         let opus_length = opus_header & 0x1FFF;
-        println!("opus length: {} done: {}", opus_length, opus_done);
+        // println!("opus length: {} done: {}", opus_length, opus_done);
         let mut segment = vec![0u8; opus_length as usize];
         match rdr.read_exact(&mut segment[..]) {
             Ok(()) => opus_frame.write_all(&segment).unwrap(),
             Err(err) => println!("{}", err),
         };
         
-        println!("opus size: {} segment: {}", opus_length, segments);
+        // println!("opus size: {} segment: {}", opus_length, segments);
         segments = segments + 1;
     }
 
-    // util::opus_analyze(&opus_frame);
+    // opus_analyze(&opus_frame);
 
     let mut sample_pcm = vec![0i16; 320 * segments];
 
@@ -61,7 +61,7 @@ pub fn opus_decode(decoder: &mut opus::Decoder, opus_frame: Vec<u8>) -> (Vec<u8>
                 println!("{}", err); 0},
         };
 
-    println!("pcm size: {}", size);
+    // println!("pcm size: {}", size);
 
     let mut pcm_data = Vec::<u8>::new();
     for s in 0..size {

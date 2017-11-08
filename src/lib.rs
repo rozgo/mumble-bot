@@ -32,7 +32,6 @@ use clap::{Arg, App};
 extern crate futures;
 
 use std::fs;
-
 use std::io::Cursor;
 use std::io::{Write, Read, Error, ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -88,6 +87,11 @@ fn app() -> App<'static, 'static> {
             .long("config")
             .help("Path to config toml")
             .takes_value(true))
+        .arg(Arg::with_name("say")
+            .short("s")
+            .long("say")
+            .help("Path to raw file to say")
+            .takes_value(true))
 }
 
 pub fn say<'a>(vox_out_rx: futures::sync::mpsc::Receiver<Vec<u8>>,
@@ -119,7 +123,7 @@ pub fn say<'a>(vox_out_rx: futures::sync::mpsc::Receiver<Vec<u8>>,
         .map_err(|_| Error::new(ErrorKind::Other, "vox out"))
 }
 
-pub fn say_test(vox_out_tx: futures::sync::mpsc::Sender<Vec<u8>>) {
+pub fn say_test(raw_file: String, vox_out_tx: futures::sync::mpsc::Sender<Vec<u8>>) {
 
     // // Hz * channel * ms / 1000
     let sample_channels: u32 = 1;
@@ -127,7 +131,7 @@ pub fn say_test(vox_out_tx: futures::sync::mpsc::Sender<Vec<u8>>) {
     let sample_ms: u32 = 10;
     let sample_size: u32 = sample_rate * sample_channels * sample_ms / 1000;
 
-    let mut pcm_file = fs::File::open("data/man16kHz.raw").unwrap();
+    let mut pcm_file = fs::File::open(raw_file).unwrap();
     let mut pcm_data = Vec::<u8>::new();
     pcm_file.read_to_end(&mut pcm_data).unwrap();
 
@@ -154,25 +158,27 @@ pub fn cmd() {
         toml::from_str(&config).unwrap()
     };
 
+    let raw_file = matches.value_of("say").unwrap_or("data/man16kHz.raw").to_string();
+    
     let local_addr: SocketAddr = config.mumble.local.parse().unwrap();
     let mumble_addr: SocketAddr = config.mumble.server.parse().unwrap();
     let mut core = Core::new().unwrap();
     let handle = core.handle();
 
     let (vox_out_tx, vox_out_rx) = futures::sync::mpsc::channel::<Vec<u8>>(1000);
-    let (vox_inp_tx, vox_inp_rx) = futures::sync::mpsc::channel::<Vec<u8>>(1000);
+    let (vox_inp_tx, vox_inp_rx) = futures::sync::mpsc::channel::<(i32, Vec<u8>)>(1000);
 
     let (app_logic, _tcp_tx, udp_tx) = run(local_addr, mumble_addr, vox_inp_tx.clone(), &handle);
 
     let say_task = say(vox_out_rx, udp_tx.clone());
 
-    // let vox_out_tx0 = vox_out_tx.clone();
-    // std::thread::spawn(|| {
-    //     std::thread::sleep(std::time::Duration::from_secs(5));
-    //     say_test(vox_out_tx0);
-    // });
+    let vox_out_tx0 = vox_out_tx.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        say_test(raw_file, vox_out_tx0);
+    });
 
-    gst::sink_main(vox_out_tx.clone());
+    // gst::sink_main(vox_out_tx.clone());
     let vox_inp_task = gst::src_main(vox_inp_rx);
 
     let tasks = Future::join3(app_logic, say_task, vox_inp_task);
@@ -180,19 +186,24 @@ pub fn cmd() {
 }
 
 pub fn run<'a>(local_addr: SocketAddr, mumble_addr: SocketAddr,
-               vox_inp_tx: futures::sync::mpsc::Sender<Vec<u8>>,
+               vox_inp_tx: futures::sync::mpsc::Sender<(i32, Vec<u8>)>,
                handle: &tokio_core::reactor::Handle)
                -> (impl Future<Item = (), Error = Error> + 'a,
                    futures::sync::mpsc::Sender<Vec<u8>>,
                    futures::sync::mpsc::Sender<udp::AudioOutPacket>) {
 
-    let crypt_state = Arc::new(Mutex::new(ocbaes128::CryptState::new()));
+    let session = Arc::new(Mutex::new(session::Session {
+        local: session::Local{id: 0},
+        remotes: HashMap::new(),
+    }));
+
+    let crypt = Arc::new(Mutex::new(ocbaes128::CryptState::new()));
     let udp_codec = udp::AudioPacketCodec {
         opus_encoder: opus::Encoder::new(16000, opus::Channels::Mono, opus::Application::Voip).unwrap(),
-        opus_decoder: opus::Decoder::new(16000, opus::Channels::Mono).unwrap(),
-        crypt_state: Arc::clone(&crypt_state),
-        encoder_sequence: 0,
-        decoder_sequence: 0};
+        opus_decoders: HashMap::new(),
+        session: Arc::clone(&session),
+        crypt: Arc::clone(&crypt),
+        encoder_sequence: 0};
 
     let udp_server_addr: SocketAddr = mumble_addr;
     let udp_local_addr: SocketAddr = local_addr;
@@ -268,7 +279,7 @@ pub fn run<'a>(local_addr: SocketAddr, mumble_addr: SocketAddr,
         let tcp_ping = tcp::tcp_ping(tcp_tx.clone());
         let udp_ping = udp::udp_ping(udp_tx.clone());
 
-        let tcp_recv_loop = tcp::tcp_recv_loop(tcp_socket_rx, tcp_tx, vox_inp_tx.clone(), Arc::clone(&crypt_state));
+        let tcp_recv_loop = tcp::tcp_recv_loop(tcp_socket_rx, tcp_tx, vox_inp_tx.clone(), Arc::clone(&session), Arc::clone(&crypt));
         let udp_recv_loop = udp::udp_recv_loop(udp_socket_rx, udp_tx, vox_inp_tx.clone());
 
         let send_tasks = Future::join(tcp_writer, udp_writer);

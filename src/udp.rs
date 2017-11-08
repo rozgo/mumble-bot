@@ -35,15 +35,16 @@ pub struct AudioOutPacket {
 pub struct AudioInPacket {
     pub type_: u32,
     pub target: u32,
+    pub session: i32,
     pub pcm: Vec<u8>,
 }
 
 pub struct AudioPacketCodec {
     pub opus_encoder: opus::Encoder,
-    pub opus_decoder: opus::Decoder,
-    pub crypt_state: Arc<Mutex<ocbaes128::CryptState>>,
+    pub opus_decoders: HashMap<u64, opus::Decoder>,
+    pub session: Arc<Mutex<session::Session>>,
+    pub crypt: Arc<Mutex<ocbaes128::CryptState>>,
     pub encoder_sequence: u64,
-    pub decoder_sequence: u64,
 }
 
 impl UdpCodec for AudioPacketCodec {
@@ -52,11 +53,13 @@ impl UdpCodec for AudioPacketCodec {
 
     fn decode(&mut self, addr: &SocketAddr, buf: &[u8]) -> std::io::Result<Self::In> {
         let crypt_len =  buf.len();
-        println!("crypt_len: {}", crypt_len);
+        // println!("crypt_len: {}", crypt_len);
         let mut data = vec![0u8; crypt_len - 4];
         {
-            let decrypt = self.crypt_state.lock().unwrap().decrypt(&buf, &mut data);
-            println!("decrypt: {}", decrypt);
+            let mut crypt = self.crypt.lock().unwrap();
+            if crypt.is_valid() {
+                crypt.decrypt(&buf, &mut data);
+            }
         }
 
         let mut rdr = Cursor::new(&data);
@@ -64,22 +67,28 @@ impl UdpCodec for AudioPacketCodec {
         // println!("incoming aud_header: {}", aud_header);
         let aud_type = (aud_header & 0b11100000) >> 5;
         let aud_target = aud_header & 0b00011111;
+        let mut session_id = 0;
 
         let data = match aud_type {
             0b100 => { // OPUS encoded voice data
-                let _aud_session = rdr.read_varint().unwrap();
-                let sequence = rdr.read_varint().unwrap();
-                println!("audio packet type: OPUS target: {} sequence: {}", aud_target, sequence);
-                self.decoder_sequence = sequence;
+                session_id = rdr.read_varint().unwrap();
+                let mut decoder = self.opus_decoders.entry(session_id).or_insert(opus::Decoder::new(16000, opus::Channels::Mono).unwrap());
+                let _sequence = rdr.read_varint().unwrap();
+                // println!("audio packet type: OPUS target: {} session: {} sequence: {}", aud_target, session, sequence);
                 let mut opus_frame = Vec::<u8>::new();
                 rdr.read_to_end(&mut opus_frame).unwrap();
-                let (data, _done) = util::opus_decode(&mut self.opus_decoder, opus_frame);
+                let (data, _done) = util::opus_decode(&mut decoder, opus_frame);
                 data
             },
             _ => vec![],
         };
 
-        Ok((*addr, AudioInPacket{type_: aud_type as u32, target: aud_target as u32, pcm: data}))
+        let idx: i32 = {
+            let session = self.session.lock().unwrap();
+            session.remotes.keys().enumerate().find(|&(_, &item)| item == session_id).map(|(idx, _)| idx as i32).unwrap_or(-1)
+        };
+
+        Ok((*addr, AudioInPacket{type_: aud_type as u32, target: aud_target as u32, session: idx, pcm: data}))
     }
 
     fn encode(&mut self, (addr, packet): Self::Out, into: &mut Vec<u8>) -> SocketAddr {
@@ -107,7 +116,12 @@ impl UdpCodec for AudioPacketCodec {
             _ => panic!("AudioPacketCodec:encode type unknown")
         }
         let mut enc = vec![0u8; data.len() + 4];
-        self.crypt_state.lock().unwrap().encrypt(&data, &mut enc);
+        {
+            let mut crypt = self.crypt.lock().unwrap();
+            if crypt.is_valid() {
+                crypt.encrypt(&data, &mut enc);
+            }
+        }
         into.extend(enc);
         addr
     }
@@ -116,7 +130,7 @@ impl UdpCodec for AudioPacketCodec {
 pub fn udp_recv_loop<'a>(
     udp_socket_rx: futures::stream::SplitStream<tokio_core::net::UdpFramed<AudioPacketCodec>>,
     _udp_tx: futures::sync::mpsc::Sender<AudioOutPacket>,
-    vox_inp_tx: futures::sync::mpsc::Sender<Vec<u8>>)
+    vox_inp_tx: futures::sync::mpsc::Sender<(i32, Vec<u8>)>)
     -> impl Future<Item = (), Error = Error> + 'a {
 
     udp_socket_rx.fold(vox_inp_tx, move |vox_inp_tx, (_socket, packet)| {
@@ -124,8 +138,8 @@ pub fn udp_recv_loop<'a>(
         match packet.type_ {
 
             0b100 => { // OPUS encoded voice data
-                println!("audio packet type: OPUS target: {}", packet.target);
-                vox_inp_tx.send(packet.pcm)
+                // println!("audio packet type: OPUS target: {}", packet.target);
+                vox_inp_tx.send((packet.session, packet.pcm))
                 .and_then(move |vox_inp_tx| {
                     ok(vox_inp_tx)
                 })
@@ -167,19 +181,19 @@ pub fn udp_recv_loop<'a>(
 pub fn udp_ping(udp_tx: futures::sync::mpsc::Sender<AudioOutPacket>)
     -> impl Future<Item = (), Error = Error> {
     tokio_timer::Timer::default()
-        .interval(Duration::from_secs(5))
-        .fold(udp_tx, move |tx, _| {
-            let packet = AudioOutPacket {
-                type_: 0b001,
-                target: 0,
-                pcm: vec![],
-                done: false,
-                timestamp: chrono::UTC::now().timestamp() as u64,
-            };
-            tx.send(packet)
-                .map_err(|_| tokio_timer::TimerError::NoCapacity)
-        })
-        .map(|_| ())
-        .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))
+    .interval(Duration::from_secs(5))
+    .fold(udp_tx, move |tx, _| {
+        let packet = AudioOutPacket {
+            type_: 0b001,
+            target: 0,
+            pcm: vec![],
+            done: false,
+            timestamp: chrono::UTC::now().timestamp() as u64,
+        };
+        tx.send(packet)
+            .map_err(|_| tokio_timer::TimerError::NoCapacity)
+    })
+    .map(|_| ())
+    .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))
 }
 

@@ -33,12 +33,13 @@ use util;
 pub fn tcp_recv_loop<'a>(
                 tcp_socket_rx: tokio_io::io::ReadHalf<connector::SslStream<tokio_core::net::TcpStream>>,
                 tcp_tx: futures::sync::mpsc::Sender<std::vec::Vec<u8>>,
-                vox_inp_tx: futures::sync::mpsc::Sender<Vec<u8>>,
-                crypt_state: Arc<Mutex<ocbaes128::CryptState>>)
+                vox_inp_tx: futures::sync::mpsc::Sender<(i32, Vec<u8>)>,
+                session: Arc<Mutex<session::Session>>,
+                crypt: Arc<Mutex<ocbaes128::CryptState>>)
                 -> impl Future<Item = (), Error = Error> + 'a {
 
-    loop_fn((tcp_socket_rx, tcp_tx, vox_inp_tx, session::Local {session: 0}, session::Remotes::new(), crypt_state),
-            |(tcp_socket_rx, tcp_tx, vox_inp_tx, local_session, remote_sessions, crypt_state)| {
+    loop_fn((tcp_socket_rx, tcp_tx, vox_inp_tx, session, crypt),
+            |(tcp_socket_rx, tcp_tx, vox_inp_tx, session, crypt)| {
 
         // get new packet
         tokio_io::io::read_exact(tcp_socket_rx, [0u8; 2])
@@ -72,7 +73,7 @@ pub fn tcp_recv_loop<'a>(
                     let mut msg = mumble::Version::new();
                     msg.merge_from(&mut inp).unwrap();
                     println!("version: {:?}", msg);
-                    ok((tcp_socket_rx, tcp_tx, vox_inp_tx, local_session, remote_sessions, crypt_state)).boxed()
+                    ok((tcp_socket_rx, tcp_tx, vox_inp_tx, session, crypt)).boxed()
                 },
                 1 => { // UDPTunnel
                     let mut rdr = Cursor::new(&buf);
@@ -84,10 +85,10 @@ pub fn tcp_recv_loop<'a>(
 
                     match aud_type {
                         128 => { // OPUS encoded voice data
-                            ok((tcp_socket_rx, tcp_tx, vox_inp_tx, local_session, remote_sessions, crypt_state)).boxed()
+                            ok((tcp_socket_rx, tcp_tx, vox_inp_tx, session, crypt)).boxed()
                         },
                         32 => { // Ping
-                            ok((tcp_socket_rx, tcp_tx, vox_inp_tx, local_session, remote_sessions, crypt_state)).boxed()
+                            ok((tcp_socket_rx, tcp_tx, vox_inp_tx, session, crypt)).boxed()
                         },
                         _ => {
                             panic!("aud_type");
@@ -98,39 +99,51 @@ pub fn tcp_recv_loop<'a>(
                     let mut msg = mumble::Ping::new();
                     msg.merge_from(&mut inp).unwrap();
                     println!("TCP Ping: {:?}", msg);
-                    ok((tcp_socket_rx, tcp_tx, vox_inp_tx, local_session, remote_sessions, crypt_state)).boxed()
+                    ok((tcp_socket_rx, tcp_tx, vox_inp_tx, session, crypt)).boxed()
                 },
                 5 => { // ServerSync
                     let mut msg = mumble::ServerSync::new();
                     msg.merge_from(&mut inp).unwrap();
                     println!("ServerSync: {:?}", msg);
-                    let local_session = session::Local {session: msg.get_session() as u64};
-                    ok((tcp_socket_rx, tcp_tx, vox_inp_tx, local_session, remote_sessions, crypt_state)).boxed()
+                    {
+                        let session = &mut session.lock().unwrap();
+                        session.local.id =  msg.get_session() as u64;
+                    }
+                    ok((tcp_socket_rx, tcp_tx, vox_inp_tx, session, crypt)).boxed()
                 },
                 7 => { // ChannelState
                     let mut msg = mumble::ChannelState::new();
                     msg.merge_from(&mut inp).unwrap();
                     println!("ChannelState: {:?}", msg);
-                    ok((tcp_socket_rx, tcp_tx, vox_inp_tx, local_session, remote_sessions, crypt_state)).boxed()
+                    ok((tcp_socket_rx, tcp_tx, vox_inp_tx, session, crypt)).boxed()
                 },
                 8 => { // UserRemove
                     let mut msg = mumble::UserRemove::new();
                     msg.merge_from(&mut inp).unwrap();
                     println!("UserRemove: {:?}", msg);
-                    ok((tcp_socket_rx, tcp_tx, vox_inp_tx, local_session, remote_sessions, crypt_state)).boxed()
+                    {
+                        let session = &mut session.lock().unwrap();
+                        let session_id = msg.get_session() as u64;
+                        session.remotes.remove(&session_id);
+                    }
+                    ok((tcp_socket_rx, tcp_tx, vox_inp_tx, session, crypt)).boxed()
                 },
                 9 => { // UserState
                     let mut msg = mumble::UserState::new();
                     msg.merge_from(&mut inp).unwrap();
                     println!("UserState: {:?}", msg);
-                    let remote_sessions = session::factory(msg.get_session() as u64, remote_sessions);
-                    ok((tcp_socket_rx, tcp_tx, vox_inp_tx, local_session, remote_sessions, crypt_state)).boxed()
+                    {
+                        let session = &mut session.lock().unwrap();
+                        let session_id = msg.get_session() as u64;
+                        session.remotes.insert(session_id, session::Remote{id: session_id});
+                    }
+                    ok((tcp_socket_rx, tcp_tx, vox_inp_tx, session, crypt)).boxed()
                 },
                 11 => { // TextMessage
                     let mut msg = mumble::TextMessage::new();
                     msg.merge_from(&mut inp).unwrap();
                     println!("TextMessage: {:?}", msg);
-                    ok((tcp_socket_rx, tcp_tx, vox_inp_tx, local_session, remote_sessions, crypt_state)).boxed()
+                    ok((tcp_socket_rx, tcp_tx, vox_inp_tx, session, crypt)).boxed()
                 },
                 15 => { // CryptSetup
                     let mut msg = mumble::CryptSetup::new();
@@ -139,36 +152,36 @@ pub fn tcp_recv_loop<'a>(
                     let crypt_client_nonce = msg.get_client_nonce();
                     let crypt_server_nonce = msg.get_server_nonce();
                     {
-                        let mut crypt_state = crypt_state.lock().unwrap();
-                        crypt_state.set_key(crypt_key, crypt_client_nonce, crypt_server_nonce);
+                        let mut crypt = crypt.lock().unwrap();
+                        crypt.set_key(crypt_key, crypt_client_nonce, crypt_server_nonce);
                     }
-                    ok((tcp_socket_rx, tcp_tx, vox_inp_tx, local_session, remote_sessions, crypt_state)).boxed()
+                    ok((tcp_socket_rx, tcp_tx, vox_inp_tx, session, crypt)).boxed()
                 },
                 20 => { // PermissionQuery
                     let mut msg = mumble::PermissionQuery::new();
                     msg.merge_from(&mut inp).unwrap();
                     println!("PermissionQuery: {:?}", msg);
-                    ok((tcp_socket_rx, tcp_tx, vox_inp_tx, local_session, remote_sessions, crypt_state)).boxed()
+                    ok((tcp_socket_rx, tcp_tx, vox_inp_tx, session, crypt)).boxed()
                 },
                 21 => { // CodecVersion
                     let mut msg = mumble::CodecVersion::new();
                     msg.merge_from(&mut inp).unwrap();
                     println!("CodecVersion: {:?}", msg);
-                    ok((tcp_socket_rx, tcp_tx, vox_inp_tx, local_session, remote_sessions, crypt_state)).boxed()
+                    ok((tcp_socket_rx, tcp_tx, vox_inp_tx, session, crypt)).boxed()
                 },
                 24 => { // ServerConfig
                     let mut msg = mumble::ServerConfig::new();
                     msg.merge_from(&mut inp).unwrap();
                     println!("ServerConfig: {:?}", msg);
-                    ok((tcp_socket_rx, tcp_tx, vox_inp_tx, local_session, remote_sessions, crypt_state)).boxed()
+                    ok((tcp_socket_rx, tcp_tx, vox_inp_tx, session, crypt)).boxed()
                 },
                 _ => {
-                    ok((tcp_socket_rx, tcp_tx, vox_inp_tx, local_session, remote_sessions, crypt_state)).boxed()
+                    ok((tcp_socket_rx, tcp_tx, vox_inp_tx, session, crypt)).boxed()
                 }
             }
         })
-        .and_then(move |(tcp_socket_rx, tcp_tx, vox_inp_tx, local_session, remote_sessions, crypt_state)| {
-            Ok(Loop::Continue((tcp_socket_rx, tcp_tx, vox_inp_tx, local_session, remote_sessions, crypt_state)))
+        .and_then(move |(tcp_socket_rx, tcp_tx, vox_inp_tx, session, crypt)| {
+            Ok(Loop::Continue((tcp_socket_rx, tcp_tx, vox_inp_tx, session, crypt)))
         })
     })
 }
