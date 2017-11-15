@@ -138,6 +138,8 @@ pub fn sink_main(vox_out_tx: futures::sync::mpsc::Sender<Vec<u8>>) -> impl Fn() 
     });
 
     move|| {
+		let ev = gst::Event::new_eos().build();
+		p.send_event(ev);
         utils::set_state(&p, gst::State::Null);
     }
 }
@@ -253,6 +255,8 @@ pub fn src_main<'a>(vox_inp_rx: futures::sync::mpsc::Receiver<(i32, Vec<u8>)>)
     });
 
     let kill_pipe = move|| {
+		let ev = gst::Event::new_eos().build();
+		p.send_event(ev);
         utils::set_state(&p, gst::State::Null);
     };
 
