@@ -95,14 +95,15 @@ fn sink_pipeline(vox_out_tx: futures::sync::mpsc::Sender<Vec<u8>>) -> Result<gst
     Ok(pipeline)
 }
 
-fn sink_loop(vox_out_tx: futures::sync::mpsc::Sender<Vec<u8>>) -> Result<(), utils::ExampleError> {
-    let pipeline = sink_pipeline(vox_out_tx).unwrap();
-
+fn sink_loop(pipeline: gst::Pipeline) -> Result<(), utils::ExampleError> {
+    
     utils::set_state(&pipeline, gst::State::Playing)?;
 
     let bus = pipeline
         .get_bus()
         .expect("Pipeline without bus. Shouldn't happen!");
+
+    println!("start sink_loop");
 
     while let Some(msg) = bus.timed_pop(gst::CLOCK_TIME_NONE) {
         use self::gst::MessageView;
@@ -121,15 +122,24 @@ fn sink_loop(vox_out_tx: futures::sync::mpsc::Sender<Vec<u8>>) -> Result<(), uti
         }
     }
 
+    println!("stop sink_loop");
+
     utils::set_state(&pipeline, gst::State::Null)?;
 
     Ok(())
 }
 
-pub fn sink_main(vox_out_tx: futures::sync::mpsc::Sender<Vec<u8>>) {
+pub fn sink_main(vox_out_tx: futures::sync::mpsc::Sender<Vec<u8>>) -> impl Fn() -> () {
+    let pipeline = sink_pipeline(vox_out_tx).unwrap();
+    let p = pipeline.clone();
+
     thread::spawn(move || {
-        sink_loop(vox_out_tx.clone());
+        sink_loop(pipeline);
     });
+
+    move|| {
+        utils::set_state(&p, gst::State::Null);
+    }
 }
 
 fn src_pipeline() -> Result<(gst::Pipeline, Vec<gst_app::AppSrc>), utils::ExampleError> {
@@ -205,6 +215,8 @@ fn src_loop(pipeline: gst::Pipeline) -> Result<(), utils::ExampleError> {
         .get_bus()
         .expect("Pipeline without bus. Shouldn't happen!");
 
+    println!("start src_loop");
+
     while let Some(msg) = bus.timed_pop(gst::CLOCK_TIME_NONE) {
         use self::gst::MessageView;
 
@@ -224,16 +236,25 @@ fn src_loop(pipeline: gst::Pipeline) -> Result<(), utils::ExampleError> {
 
     utils::set_state(&pipeline, gst::State::Null)?;
 
+    println!("stop src_loop");
+
     Ok(())
 }
 
 pub fn src_main<'a>(vox_inp_rx: futures::sync::mpsc::Receiver<(i32, Vec<u8>)>)
--> impl Future<Item = (), Error = Error> + 'a {
+-> (impl Fn() -> (), impl Future<Item = (), Error = Error> + 'a) {
     let (pipeline, appsrcs) = src_pipeline().unwrap();
+    let p = pipeline.clone();
 
     thread::spawn(move || {
+        println!("start thread src_loop");
         src_loop(pipeline).unwrap();
+        println!("stop thread src_loop");
     });
 
-    src_rx(appsrcs, vox_inp_rx)
+    let kill_pipe = move|| {
+        utils::set_state(&p, gst::State::Null);
+    };
+
+    (kill_pipe, src_rx(appsrcs, vox_inp_rx))
 }

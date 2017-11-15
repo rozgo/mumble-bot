@@ -146,22 +146,22 @@ pub fn udp_recv_loop<'a>(
                 .boxed()
             },
             0b001 => { // Ping
-                println!("audio packet type: Ping target: {}", packet.target);
+                // println!("audio packet type: Ping target: {}", packet.target);
                 ok(vox_inp_tx)
                 .boxed()
             },
             0b000 => { // CELT Alpha
-                println!("audio packet type: CELT Alpha target: {}", packet.target);
+                // println!("audio packet type: CELT Alpha target: {}", packet.target);
                 ok(vox_inp_tx)
                 .boxed()
             },
             0b010 => { // Speex
-                println!("audio packet type: Speex target: {}", packet.target);
+                // println!("audio packet type: Speex target: {}", packet.target);
                 ok(vox_inp_tx)
                 .boxed()
             },
             0b111 => { // dropped
-                println!("audio packet type: DROPPED target: {}", packet.target);
+                // println!("audio packet type: DROPPED target: {}", packet.target);
                 ok(vox_inp_tx)
                 .boxed()
             },

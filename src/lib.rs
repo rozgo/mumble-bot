@@ -41,7 +41,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use futures::{Sink, Stream};
-use futures::future::{Future, ok, loop_fn, IntoFuture, Loop};
+use futures::future::{Future, ok, err, loop_fn, IntoFuture, Loop};
 
 use openssl::ssl::{SslContext, SslMethod, SSL_VERIFY_PEER};
 use openssl::x509::X509_FILETYPE_PEM;
@@ -145,8 +145,8 @@ pub fn say_test(raw_file: String, vox_out_tx: futures::sync::mpsc::Sender<Vec<u8
     println!("END: say_test");
 }
 
-pub fn cmd() {
-    pretty_env_logger::init().unwrap();
+pub fn cmd() -> Result<((), (), (), ()), Error> {
+    // pretty_env_logger::init().unwrap();
 
     let matches = app().get_matches();
 
@@ -172,17 +172,28 @@ pub fn cmd() {
 
     let say_task = say(vox_out_rx, udp_tx.clone());
 
+    let kill_sink = gst::sink_main(vox_out_tx.clone());
+    let (kill_src, vox_inp_task) = gst::src_main(vox_inp_rx);
+
+    let (kill_tx, kill_rx) = futures::sync::mpsc::channel::<()>(0);
+    let kill_switch = kill_rx
+    .fold((), |_a, _b| {
+        println!("kill_switch");
+        kill_sink();
+        kill_src();
+        err::<(),()>(())
+    })
+    .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "kill_switch"));
+
     let vox_out_tx0 = vox_out_tx.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(5));
-        say_test(raw_file, vox_out_tx0);
+        // say_test(raw_file, vox_out_tx0);
+        kill_tx.wait().send(()).unwrap();
     });
 
-    // gst::sink_main(vox_out_tx.clone());
-    let vox_inp_task = gst::src_main(vox_inp_rx);
-
-    let tasks = Future::join3(app_logic, say_task, vox_inp_task);
-    core.run(tasks).unwrap();
+    let tasks = Future::join4(kill_switch, app_logic, say_task, vox_inp_task);
+    core.run(tasks)
 }
 
 pub fn run<'a>(local_addr: SocketAddr, mumble_addr: SocketAddr,
