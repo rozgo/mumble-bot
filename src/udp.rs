@@ -129,7 +129,6 @@ impl UdpCodec for AudioPacketCodec {
 
 pub fn udp_recv_loop<'a>(
     udp_socket_rx: futures::stream::SplitStream<tokio_core::net::UdpFramed<AudioPacketCodec>>,
-    _udp_tx: futures::sync::mpsc::Sender<AudioOutPacket>,
     vox_inp_tx: futures::sync::mpsc::Sender<(i32, Vec<u8>)>)
     -> impl Future<Item = (), Error = Error> + 'a {
 

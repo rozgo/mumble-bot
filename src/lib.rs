@@ -279,8 +279,8 @@ pub fn run<'a>(local_addr: SocketAddr, mumble_addr: SocketAddr,
         let tcp_ping = tcp::tcp_ping(tcp_tx.clone());
         let udp_ping = udp::udp_ping(udp_tx.clone());
 
-        let tcp_recv_loop = tcp::tcp_recv_loop(tcp_socket_rx, tcp_tx, vox_inp_tx.clone(), Arc::clone(&session), Arc::clone(&crypt));
-        let udp_recv_loop = udp::udp_recv_loop(udp_socket_rx, udp_tx, vox_inp_tx.clone());
+        let tcp_recv_loop = tcp::tcp_recv_loop(tcp_socket_rx, tcp_tx, Arc::clone(&session), Arc::clone(&crypt));
+        let udp_recv_loop = udp::udp_recv_loop(udp_socket_rx, vox_inp_tx.clone());
 
         let send_tasks = Future::join(tcp_writer, udp_writer);
         let ping_tasks = Future::join(tcp_ping, udp_ping);

@@ -80,11 +80,15 @@ fn sink_pipeline(vox_out_tx: futures::sync::mpsc::Sender<Vec<u8>>) -> Result<gst
             if let Ok(samples) = map.as_slice().as_slice_of::<u8>() {
                 let mut vox_out_tx = vox_out_tx.lock().unwrap();
                 let v = samples.to_vec();
-                vox_out_tx.send(v);
-                return gst::FlowReturn::Ok;
+                if let Err(_) = vox_out_tx.send(v) {
+                    gst::FlowReturn::Error
+                }
+                else {
+                    return gst::FlowReturn::Ok
+                }
             } else {
-                return gst::FlowReturn::Error;
-            };
+                return gst::FlowReturn::Error
+            }
         },
     ));
 
