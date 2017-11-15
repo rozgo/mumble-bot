@@ -64,7 +64,7 @@ pub fn tcp_recv_loop<'a>(
         // packet payload
         .and_then(|(tcp_socket_rx, buf, mum_type)| {
 
-            println!("mum_type: {}", mum_type);
+            // println!("mum_type: {}", mum_type);
 
             let mut inp = CodedInputStream::from_bytes(&buf);
 
@@ -98,7 +98,7 @@ pub fn tcp_recv_loop<'a>(
                 3 => { // Ping
                     let mut msg = mumble::Ping::new();
                     msg.merge_from(&mut inp).unwrap();
-                    println!("TCP Ping: {:?}", msg);
+                    // println!("TCP Ping: {:?}", msg);
                     ok((tcp_socket_rx, tcp_tx, vox_inp_tx, session, crypt)).boxed()
                 },
                 5 => { // ServerSync
