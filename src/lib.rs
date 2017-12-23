@@ -28,6 +28,10 @@ extern crate toml;
 #[macro_use]
 extern crate serde_derive;
 
+extern crate failure;
+#[macro_use]
+extern crate failure_derive;
+
 use clap::{Arg, App};
 extern crate futures;
 
@@ -69,7 +73,6 @@ mod config;
 mod util;
 
 pub mod gst;
-mod utils;
 
 
 fn app() -> App<'static, 'static> {
@@ -172,14 +175,14 @@ pub fn cmd() -> Result<((), (), (), ()), Error> {
 
     let say_task = say(vox_out_rx, udp_tx.clone());
 
-    let kill_sink = gst::sink_main(vox_out_tx.clone());
+    //let kill_sink = gst::sink_main(vox_out_tx.clone());
     let (kill_src, vox_inp_task) = gst::src_main(vox_inp_rx);
 
     let (kill_tx, kill_rx) = futures::sync::mpsc::channel::<()>(0);
     let kill_switch = kill_rx
     .fold((), |_a, _b| {
         println!("kill_switch");
-        kill_sink();
+        //kill_sink();
         kill_src();
         err::<(),()>(())
     })
@@ -188,7 +191,7 @@ pub fn cmd() -> Result<((), (), (), ()), Error> {
     let vox_out_tx0 = vox_out_tx.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(5));
-        // say_test(raw_file, vox_out_tx0);
+        say_test(raw_file, vox_out_tx0);
         kill_tx.wait().send(()).unwrap();
     });
 
