@@ -26,11 +26,11 @@ use protobuf::{CodedOutputStream, CodedInputStream};
 use session;
 
 
-pub fn opus_decode(decoder: &mut opus::Decoder, opus_frame: Vec<u8>) -> (Vec<u8>, bool) {
+pub fn opus_decode(decoder: &mut opus::Decoder, opus_cursor: &mut Cursor<&Vec<u8>>) -> (Vec<u8>, bool) {
 
     // println!("!!__@__!!__@__!!__@__!!__@__!!__@__!!__@__!!__@__!!__@__!!__@__!!__@__");
 
-    let mut rdr = Cursor::new(opus_frame);
+    let rdr = opus_cursor;
 
     let mut opus_frame = Vec::<u8>::new();
     let mut segments = 0;

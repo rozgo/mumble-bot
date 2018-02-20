@@ -71,6 +71,8 @@ use varint::VarintWriter;
 mod rnd;
 mod config;
 mod util;
+mod positional;
+use positional::*;
 
 pub mod gst;
 
@@ -148,7 +150,7 @@ pub fn say_test(raw_file: String, vox_out_tx: futures::sync::mpsc::Sender<Vec<u8
     println!("END: say_test");
 }
 
-pub fn cmd() -> Result<((), (), (), ()), Error> {
+pub fn cmd() -> Result<((), (), ()), Error> {
     // pretty_env_logger::init().unwrap();
 
     let matches = app().get_matches();
@@ -169,38 +171,38 @@ pub fn cmd() -> Result<((), (), (), ()), Error> {
     let handle = core.handle();
 
     let (vox_out_tx, vox_out_rx) = futures::sync::mpsc::channel::<Vec<u8>>(1000);
-    let (vox_inp_tx, vox_inp_rx) = futures::sync::mpsc::channel::<(i32, Vec<u8>)>(1000);
+    let (vox_inp_tx, vox_inp_rx) = futures::sync::mpsc::channel::<(i32, Vec<u8>, PositionalAudio)>(1000);
 
     let (app_logic, _tcp_tx, udp_tx) = run(local_addr, mumble_addr, vox_inp_tx.clone(), &handle);
 
-    let say_task = say(vox_out_rx, udp_tx.clone());
+    //let say_task = say(vox_out_rx, udp_tx.clone());
 
-    //let kill_sink = gst::sink_main(vox_out_tx.clone());
+    let kill_sink = gst::sink_main(vox_out_tx.clone());
     let (kill_src, vox_inp_task) = gst::src_main(vox_inp_rx);
 
     let (kill_tx, kill_rx) = futures::sync::mpsc::channel::<()>(0);
     let kill_switch = kill_rx
     .fold((), |_a, _b| {
         println!("kill_switch");
-        //kill_sink();
+        kill_sink();
         kill_src();
         err::<(),()>(())
     })
     .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "kill_switch"));
 
-    let vox_out_tx0 = vox_out_tx.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_secs(5));
-        say_test(raw_file, vox_out_tx0);
-        kill_tx.wait().send(()).unwrap();
-    });
+    // let vox_out_tx0 = vox_out_tx.clone();
+    // std::thread::spawn(move || {
+    //     std::thread::sleep(std::time::Duration::from_secs(5));
+    //     say_test(raw_file, vox_out_tx0);
+    //     kill_tx.wait().send(()).unwrap();
+    // });
 
-    let tasks = Future::join4(kill_switch, app_logic, say_task, vox_inp_task);
+    let tasks = Future::join3(kill_switch, app_logic, vox_inp_task);
     core.run(tasks)
 }
 
 pub fn run<'a>(local_addr: SocketAddr, mumble_addr: SocketAddr,
-               vox_inp_tx: futures::sync::mpsc::Sender<(i32, Vec<u8>)>,
+               vox_inp_tx: futures::sync::mpsc::Sender<(i32, Vec<u8>, PositionalAudio)>,
                handle: &tokio_core::reactor::Handle)
                -> (impl Future<Item = (), Error = Error> + 'a,
                    futures::sync::mpsc::Sender<Vec<u8>>,

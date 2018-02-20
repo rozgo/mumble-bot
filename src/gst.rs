@@ -20,6 +20,8 @@ use futures;
 use futures::{Sink, Stream};
 use futures::future::{Future, err, ok, loop_fn, IntoFuture, Loop};
 
+use positional::*;
+
 #[derive(Debug, Fail)]
 #[fail(display = "Missing element {}", _0)]
 struct MissingElement(&'static str);
@@ -159,7 +161,7 @@ pub fn sink_main(vox_out_tx: futures::sync::mpsc::Sender<Vec<u8>>) -> impl Fn() 
     }
 }
 
-fn src_pipeline() -> Result<(gst::Pipeline, Vec<gst_app::AppSrc>), Error> {
+fn src_pipeline() -> Result<(gst::Pipeline, Vec<(gst_app::AppSrc, gst::Element)>), Error> {
 
     gst::init()?;
 
@@ -181,44 +183,59 @@ fn src_pipeline() -> Result<(gst::Pipeline, Vec<gst_app::AppSrc>), Error> {
         let audioconvert = gst::ElementFactory::make("audioconvert", None).ok_or(MissingElement("audioconvert"))?;
         let sink = gst::ElementFactory::make("autoaudiosink", None).ok_or(MissingElement("autoaudiosink"))?;
         sink.set_property("async-handling", &true).expect("Unable to set property in the element");
-        pipeline.add_many(&[&appsrc, &audioconvert, &sink])?;
+
+        let oculuspositional = gst::ElementFactory::make("oculuspositional", None).ok_or(MissingElement("oculuspositional"))?;
+        oculuspositional.set_property("range-min", &(0.0f32)).expect("Unable to set property in the element");
+        oculuspositional.set_property("range-max", &(100.0f32)).expect("Unable to set property in the element");
+        oculuspositional.set_property("in-use", &(true)).expect("Unable to set property in the element");
+        oculuspositional.set_property("x", &(0.0f32)).expect("Unable to set property in the element");
+        oculuspositional.set_property("y", &(0.0f32)).expect("Unable to set property in the element");
+        oculuspositional.set_property("z", &(0.0f32)).expect("Unable to set property in the element");
+
+        pipeline.add_many(&[&appsrc, &audioconvert, &oculuspositional, &sink])?;
         appsrc.link(&audioconvert)?;
         audioconvert.link(&sink)?;
-        appsrcs.push(Box::new(appsrc));
-    }
 
-    let appsrcs = appsrcs.iter().map(|src| {
-        let appsrc = (*src).clone()
+        let appsrc = appsrc.clone()
             .dynamic_cast::<gst_app::AppSrc>()
             .expect("Source element is expected to be an appsrc!");
         appsrc.set_caps(&caps);
-        appsrc
-    });
 
-    let appsrcs = appsrcs.collect();
+        appsrcs.push((appsrc, oculuspositional));
+    }
+
+    // let appsrcs = appsrcs.iter().map(|src| {
+    //     let appsrc = (*src).clone()
+    //         .dynamic_cast::<gst_app::AppSrc>()
+    //         .expect("Source element is expected to be an appsrc!");
+    //     appsrc.set_caps(&caps);
+    //     appsrc
+    // });
+
+    // let appsrcs = appsrcs.collect();
 
     pipeline.use_clock(None::<&gst::Clock>);
 
     Ok((pipeline, appsrcs))
 }
 
-fn src_rx<'a>(appsrc: Vec<gst_app::AppSrc>, vox_inp_rx: futures::sync::mpsc::Receiver<(i32, Vec<u8>)>)
+fn src_rx<'a>(elems: Vec<(gst_app::AppSrc, gst::Element)>, vox_inp_rx: futures::sync::mpsc::Receiver<(i32, Vec<u8>, PositionalAudio)>)
 -> impl Future<Item = (), Error = std::io::Error> + 'a {
-    vox_inp_rx.fold(appsrc, |appsrc, (session, bytes)| {
+    vox_inp_rx.fold(elems, |elems, (session, bytes, pos)| {
         if session >= 0 {
             let idx = session as usize;
             let buffer = gst::Buffer::from_slice(bytes).expect("gst::Buffer::from_slice(bytes)");
             //buffer.set_pts(i * 500 * gst::MSECOND);
-            if appsrc[idx].push_buffer(buffer) != gst::FlowReturn::Ok {
-                appsrc[idx].end_of_stream();
+            if elems[idx].0.push_buffer(buffer) != gst::FlowReturn::Ok {
+                elems[idx].0.end_of_stream();
                 err(())
             }
             else {
-                ok(appsrc)
+                ok(elems)
             }
         }
         else {
-            ok(appsrc)
+            ok(elems)
         }
     })
     .map(|_| ())
@@ -262,7 +279,7 @@ fn src_loop(pipeline: gst::Pipeline) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn src_main<'a>(vox_inp_rx: futures::sync::mpsc::Receiver<(i32, Vec<u8>)>)
+pub fn src_main<'a>(vox_inp_rx: futures::sync::mpsc::Receiver<(i32, Vec<u8>, PositionalAudio)>)
 -> (impl Fn() -> (), impl Future<Item = (), Error = std::io::Error> + 'a) {
     let (pipeline, appsrcs) = src_pipeline().unwrap();
     let p = pipeline.clone();

@@ -23,6 +23,7 @@ use varint::VarintWriter;
 
 use session;
 use util;
+use positional::*;
 
 pub struct AudioOutPacket {
     pub type_: u32,
@@ -37,6 +38,7 @@ pub struct AudioInPacket {
     pub target: u32,
     pub session: i32,
     pub pcm: Vec<u8>,
+    pub pos: PositionalAudio,
 }
 
 pub struct AudioPacketCodec {
@@ -62,7 +64,7 @@ impl UdpCodec for AudioPacketCodec {
             }
         }
 
-        let mut rdr = Cursor::new(&data);
+        let mut rdr = &mut Cursor::new(&data);
         let aud_header = rdr.read_u8().unwrap();
         // println!("incoming aud_header: {}", aud_header);
         let aud_type = (aud_header & 0b11100000) >> 5;
@@ -75,20 +77,20 @@ impl UdpCodec for AudioPacketCodec {
                 let mut decoder = self.opus_decoders.entry(session_id).or_insert(opus::Decoder::new(16000, opus::Channels::Mono).unwrap());
                 let _sequence = rdr.read_varint().unwrap();
                 // println!("audio packet type: OPUS target: {} session: {} sequence: {}", aud_target, session, sequence);
-                let mut opus_frame = Vec::<u8>::new();
-                rdr.read_to_end(&mut opus_frame).unwrap();
-                let (data, _done) = util::opus_decode(&mut decoder, opus_frame);
+                let (data, _done) = util::opus_decode(&mut decoder, rdr);
                 data
             },
             _ => vec![],
         };
+
+        let pos = PositionalAudio {x: 0.0, y: 0.0, z: 0.0};
 
         let idx: i32 = {
             let session = self.session.lock().unwrap();
             session.remotes.keys().enumerate().find(|&(_, &item)| item == session_id).map(|(idx, _)| idx as i32).unwrap_or(-1)
         };
 
-        Ok((*addr, AudioInPacket{type_: aud_type as u32, target: aud_target as u32, session: idx, pcm: data}))
+        Ok((*addr, AudioInPacket{type_: aud_type as u32, target: aud_target as u32, session: idx, pcm: data, pos: pos}))
     }
 
     fn encode(&mut self, (addr, packet): Self::Out, into: &mut Vec<u8>) -> SocketAddr {
@@ -129,7 +131,7 @@ impl UdpCodec for AudioPacketCodec {
 
 pub fn udp_recv_loop<'a>(
     udp_socket_rx: futures::stream::SplitStream<tokio_core::net::UdpFramed<AudioPacketCodec>>,
-    vox_inp_tx: futures::sync::mpsc::Sender<(i32, Vec<u8>)>)
+    vox_inp_tx: futures::sync::mpsc::Sender<(i32, Vec<u8>, PositionalAudio)>)
     -> impl Future<Item = (), Error = Error> + 'a {
 
     udp_socket_rx.fold(vox_inp_tx, move |vox_inp_tx, (_socket, packet)| {
@@ -138,7 +140,7 @@ pub fn udp_recv_loop<'a>(
 
             0b100 => { // OPUS encoded voice data
                 // println!("audio packet type: OPUS target: {}", packet.target);
-                vox_inp_tx.send((packet.session, packet.pcm))
+                vox_inp_tx.send((packet.session, packet.pcm, packet.pos))
                 .and_then(move |vox_inp_tx| {
                     ok(vox_inp_tx)
                 })
